@@ -32,10 +32,23 @@
 #     this for realistic multi-request serving load, especially on larger cards
 #     where decode-single is under-loaded and produces flat power curves.
 #
+#     ⚠️ VARIANCE CAVEAT: decode-concurrent runs n=1 measurement per cap (one
+#     batch of N concurrent requests for narr, one for code). Aggregate TPS
+#     can vary 10-30% between back-to-back runs at the SAME cap because vLLM's
+#     continuous-batching window is timing-sensitive — whether N requests
+#     batch together vs queue sequentially depends on arrival jitter. Single
+#     caps may show TPS going the "wrong direction" between adjacent caps.
+#     For cross-rig anchor data, prefer one of: (a) bump --concurrency to 8
+#     or 16 so per-stream noise averages out; (b) run the sweep 2-3 times
+#     and median per cap; (c) read curve shape across the full 30-cap sweep
+#     instead of comparing adjacent caps.
+#
 #   prefill-heavy:
 #     Sends one large prompt with a tiny decode tail and reports prompt prefill
 #     TPS. This is the cleanest intrinsic compute curve when decode workloads
-#     are too small to move the card.
+#     are too small to move the card. Lower variance than decode-concurrent
+#     (single request per cap, no batching jitter; nonce defeats prefix-cache
+#     reuse between caps).
 #
 # Per-card starting points:
 #   3090 / 4090: decode-single or decode-concurrent both usually surface a knee.
@@ -687,6 +700,12 @@ fi
     decode-concurrent)
       echo "- Load mode: \`decode-concurrent\` — ${CONCURRENCY} parallel chat completions for narr, then ${CONCURRENCY} parallel chat completions for code."
       echo "- TPS columns are **aggregate** throughput: total completion tokens across streams / batch wall time."
+      echo "- ⚠️ **Variance caveat**: each cap is a **single batch of ${CONCURRENCY} concurrent requests** (n=1)."
+      echo "  Aggregate TPS can vary 10-30% between back-to-back runs at the same cap because vLLM's"
+      echo "  continuous-batching window is timing-sensitive — adjacent caps may show TPS going the"
+      echo "  \"wrong direction\" without that being a real signal. Read **curve shape across the full"
+      echo "  sweep**, not adjacent-cap deltas. For tighter cross-rig anchors, bump \`--concurrency\` to 8"
+      echo "  or 16 so per-stream noise averages out, or run the sweep 2-3× and median per cap."
       ;;
     prefill-heavy)
       echo "- Load mode: \`prefill-heavy\` — one large prompt with \`max_tokens=10\`; both TPS columns show prompt prefill TPS."
