@@ -10,13 +10,23 @@
 #   commands and bench invocations.
 #
 # Usage:
-#   sudo bash scripts/power-cap-sweep.sh                          # default sweep + auto-reset
-#   sudo bash scripts/power-cap-sweep.sh --caps 300,340,380       # custom caps
+#   sudo bash scripts/power-cap-sweep.sh                          # auto-derived sweep (6 steps min→max for the card)
+#   sudo bash scripts/power-cap-sweep.sh --steps 10               # finer granularity (10 evenly-spaced caps)
+#   sudo bash scripts/power-cap-sweep.sh --caps 260,280,300       # explicit caps (overrides auto-derive)
 #   sudo bash scripts/power-cap-sweep.sh --gpu 1                  # specific GPU index
 #   sudo bash scripts/power-cap-sweep.sh --cooling water          # tag the run as water-cooled
 #   sudo bash scripts/power-cap-sweep.sh --cooling air            # tag as air-cooled
 #   sudo bash scripts/power-cap-sweep.sh --cooling aio            # tag as AIO/closed-loop
 #   sudo bash scripts/power-cap-sweep.sh --no-reset               # leave at last cap (you reset manually)
+#
+# Default sweep behavior:
+#   Without --caps, the script reads the card's power.min_limit and
+#   power.max_limit and generates 6 evenly-spaced caps rounded to 10W.
+#   For a 3090 (~120-388W) → 120/170/220/270/320/388W.
+#   For a 4090 (~150-450W) → 150/210/270/330/390/450W.
+#   For a 5090 (~250-575W) → 250/315/380/445/510/575W.
+#   This keeps the first sweep on a new rig exploratory; rerun with finer
+#   --steps or specific --caps to zoom in on the knee.
 #
 # Output:
 #   - Per-cap bench logs at /tmp/power-cap-N{wattage}.log
@@ -37,15 +47,17 @@ set -euo pipefail
 
 # Defaults — override via flags
 GPU_INDEX=0
-CAPS="300,320,340,360,380"
-RESET=1   # 1 = reset to stock at end; 0 = leave at last cap
+CAPS=""    # empty → auto-derive from card's min/max power limits at 6 even steps
+RESET=1    # 1 = reset to stock at end; 0 = leave at last cap
 COOLING="unspecified"  # air|water|aio|unspecified — affects how to read the data
+NUM_STEPS=6   # number of caps to test if --caps not specified
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --gpu)        GPU_INDEX="$2"; shift 2 ;;
     --caps)       CAPS="$2"; shift 2 ;;
     --cooling)    COOLING="$2"; shift 2 ;;
+    --steps)      NUM_STEPS="$2"; shift 2 ;;
     --no-reset)   RESET=0; shift ;;
     -h|--help)
       sed -n '1,/^set -euo/p' "$0" | grep '^#' | sed 's/^# \?//'
@@ -114,15 +126,47 @@ fi
 export URL CONTAINER MODEL
 echo "[setup] target:   container=$CONTAINER url=$URL model=$MODEL"
 
-# Capture stock TDP (so we can reset cleanly even on non-3090/4090/5090 cards)
+# Capture card's power envelope (so we can reset cleanly + auto-derive sweep range)
 STOCK_TDP=$(nvidia-smi --query-gpu=power.default_limit --format=csv,noheader,nounits -i "$GPU_INDEX" | head -1 | tr -d ' ')
-GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader -i "$GPU_INDEX" | head -1)
-GPU_VRAM=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits -i "$GPU_INDEX" | head -1 | tr -d ' ')
+MIN_LIMIT=$(nvidia-smi --query-gpu=power.min_limit     --format=csv,noheader,nounits -i "$GPU_INDEX" | head -1 | tr -d ' ')
+MAX_LIMIT=$(nvidia-smi --query-gpu=power.max_limit     --format=csv,noheader,nounits -i "$GPU_INDEX" | head -1 | tr -d ' ')
+GPU_NAME=$(nvidia-smi --query-gpu=name                  --format=csv,noheader            -i "$GPU_INDEX" | head -1)
+GPU_VRAM=$(nvidia-smi --query-gpu=memory.total          --format=csv,noheader,nounits     -i "$GPU_INDEX" | head -1 | tr -d ' ')
+
+# If --caps not specified, derive an evenly-spaced sweep across the card's
+# operating range. This makes the script work out-of-the-box on any GPU class
+# (3090 ~120-388W, 4090 ~150-450W, 5090 ~250-575W, A5000 ~100-230W, etc.)
+# without each contributor having to know their card's stock TDP.
+if [ -z "$CAPS" ]; then
+  CAPS=$(python3 -c "
+min_l = float('${MIN_LIMIT%.*}')
+max_l = float('${MAX_LIMIT%.*}')
+n = max(2, int('${NUM_STEPS}'))
+# Round each step to nearest 10W for cleanliness (don't lose more than a few
+# percent off the actual evenly-spaced points).
+steps = [round((min_l + i * (max_l - min_l) / (n - 1)) / 10) * 10 for i in range(n)]
+# Ensure first/last respect min/max bounds (rounding can underflow/overflow).
+steps[0]  = max(steps[0],  int(min_l))
+steps[-1] = min(steps[-1], int(max_l))
+# Deduplicate (rounding can collapse near-equal values on narrow ranges).
+seen = []
+for s in steps:
+    if s not in seen: seen.append(s)
+print(','.join(str(s) for s in seen))
+")
+  AUTO_DERIVED=1
+else
+  AUTO_DERIVED=0
+fi
 
 echo "[setup] GPU $GPU_INDEX: $GPU_NAME ($GPU_VRAM MiB)"
-echo "[setup] stock TDP: ${STOCK_TDP}W"
+echo "[setup] power envelope: ${MIN_LIMIT}W (min) → ${STOCK_TDP}W (default) → ${MAX_LIMIT}W (max)"
 echo "[setup] cooling:   $COOLING"
-echo "[setup] sweep caps: $CAPS W"
+if [ "$AUTO_DERIVED" -eq 1 ]; then
+  echo "[setup] sweep caps: $CAPS W (auto-derived: $NUM_STEPS evenly-spaced steps; override via --caps)"
+else
+  echo "[setup] sweep caps: $CAPS W (user-specified)"
+fi
 echo "[setup] reset at end: $([ $RESET -eq 1 ] && echo yes || echo no)"
 echo
 
