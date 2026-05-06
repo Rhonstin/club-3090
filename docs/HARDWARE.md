@@ -74,6 +74,8 @@ Past 330W: diminishing returns (SM clocks saturate near 1.9 GHz on 3090s); 388W 
 
 **Caveat — 230W on llama.cpp + GDN models is more aggressive than it looks**: cross-rig data from [@syangsao](https://github.com/noonghunna/club-3090/issues/58#issuecomment-4388766174) (1× water-cooled 3090, llama.cpp + Qwen3.6 Q3_K_XL) shows **230W costs ~34% TPS** vs stock (25 vs 38 TPS) because the chunked_gated_delta_rule kernel is genuinely compute-bound on this model, not memory-bound. On vLLM + AutoRound the same cap costs less (~10-15%) because the kernel mix is GEMM-dominated. **Recommendation**: use 330W as the default cap on either engine. Drop to 230W only if you're more thermal-constrained than perf-constrained, and expect the larger penalty on llama.cpp.
 
+**Cooling caveat**: the 388W stock numbers above are from a water-cooled rig (Alphacool Eiswolf 2 AIO 360mm) — that's what lets the card actually sustain full board power. On **air-cooled 3090s**, thermal throttling typically kicks in at ~80°C and drops effective power to ~310-340W under sustained decode load even with no software cap, so 388W → 330W gap mostly disappears — your "stock" was likely already 330W-equivalent. The 330W cap mainly helps liquid-cooled rigs by keeping the card cooler + quieter at near-zero perf cost; on air-cooled it's a soft no-op that just makes the throttling explicit.
+
 For dual-card: combined power at 330W cap each = ~660W under heavy load — verify your PSU has at least 850W single rail. 230W cap each = ~460W combined for thermally-constrained builds.
 
 Cross-rig power-cap data (anchor points):
@@ -82,7 +84,7 @@ Cross-rig power-cap data (anchor points):
 |---|---|---:|---:|---:|---|
 | llama.cpp default | Qwen3.6 27B Q3_K_XL | 230W | 25.15 | 24.86 | [@syangsao #58](https://github.com/noonghunna/club-3090/issues/58#issuecomment-4388766174) |
 | llama.cpp default | Qwen3.6 27B Q3_K_XL | 330W | 36.35 | 36.26 | [@syangsao #58](https://github.com/noonghunna/club-3090/issues/58#issuecomment-4388766174) |
-| llama.cpp default | Qwen3.6 27B Q3_K_XL | 388W | 38.23 | 37.97 | [@syangsao #58](https://github.com/noonghunna/club-3090/issues/58#issuecomment-4388766174) |
+| llama.cpp default | Qwen3.6 27B Q3_K_XL | 388W (stock, **water-cooled**) | 38.23 | 37.97 | [@syangsao #58](https://github.com/noonghunna/club-3090/issues/58#issuecomment-4388766174) |
 
 ---
 
