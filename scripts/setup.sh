@@ -6,12 +6,17 @@
 #
 # Currently supported:
 #   qwen3.6-27b   →  Lorbus/Qwen3.6-27B-int4-AutoRound + Genesis patches
+#   gemma-4-31b   →  Intel/gemma-4-31B-it-int4-AutoRound + Google MTP "assistant"
+#                    drafter (no Genesis — not yet integrated upstream as of v7.72.2)
 #
 # What it does (per supported model):
 #   - clones Sandermage/genesis-vllm-patches into models/<model>/vllm/patches/genesis
-#     (vLLM-only; skip with SKIP_GENESIS=1 if you only need llama.cpp / SGLang)
+#     (vLLM-only; skip with SKIP_GENESIS=1 if you only need llama.cpp / SGLang;
+#     Gemma 4 doesn't fetch Genesis at all yet)
 #   - downloads model weights into $MODEL_DIR with SHA256 verification
 #     against HF x-linked-etag
+#   - downloads the always-required drafter (Gemma 4: MTP "assistant"; Qwen3.6:
+#     no always-required drafter — DFlash is optional via WITH_DFLASH_DRAFT=1)
 #
 # Env vars (optional):
 #   MODEL_DIR           Where to place model weights. Default: <repo>/models-cache
@@ -39,8 +44,20 @@ if [[ -z "${MODEL_NAME}" ]]; then
   echo ""
   echo "Supported model names:"
   echo "  qwen3.6-27b"
+  echo "  gemma-4-31b"
   exit 1
 fi
+
+# ALWAYS_DRAFT_REPO + ALWAYS_DRAFT_SUBDIR: a drafter that this model REQUIRES
+# (vs the optional WITH_DFLASH_DRAFT path). Empty for Qwen3.6 (no required
+# drafter); Google MTP drafter for Gemma 4 (canonical recipe per Gemma 4 docs +
+# our gemma-mtp.yml compose).
+ALWAYS_DRAFT_REPO=""
+ALWAYS_DRAFT_SUBDIR=""
+
+# Per-model dflash drafter info (overrides defaults set later for non-qwen3.6).
+DFLASH_REPO_OVERRIDE=""
+DFLASH_SUBDIR_OVERRIDE=""
 
 case "${MODEL_NAME}" in
   qwen3.6-27b)
@@ -48,9 +65,25 @@ case "${MODEL_NAME}" in
     MODEL_SUBDIR="qwen3.6-27b-autoround-int4"
     NEEDS_GENESIS=1
     ;;
+  gemma-4-31b)
+    MODEL_REPO="Intel/gemma-4-31B-it-int4-AutoRound"
+    MODEL_SUBDIR="gemma-4-31b-autoround-int4"
+    # Gemma 4 isn't Genesis-integrated yet — Sander's roadmap (disc #19) lists
+    # Gemma 4 as a follow-up. Until v7.73.x or later integrates it, skip Genesis
+    # entirely on this path.
+    NEEDS_GENESIS=0
+    # Google ships the MTP drafter with the canonical Gemma 4 recipe; our
+    # gemma-mtp.yml compose requires it. Always-fetch (no opt-in flag).
+    ALWAYS_DRAFT_REPO="google/gemma-4-31B-it-assistant"
+    ALWAYS_DRAFT_SUBDIR="gemma-4-31b-it-assistant"
+    # DFlash drafter is z-lab/gemma-4-31B-it-DFlash (different repo than
+    # Qwen3.6's z-lab/Qwen3.6-27B-DFlash).
+    DFLASH_REPO_OVERRIDE="z-lab/gemma-4-31B-it-dflash"
+    DFLASH_SUBDIR_OVERRIDE="gemma-4-31b-it-dflash"
+    ;;
   *)
     echo "ERROR: unsupported model '${MODEL_NAME}'."
-    echo "Supported: qwen3.6-27b"
+    echo "Supported: qwen3.6-27b, gemma-4-31b"
     echo "(To add a new model, extend the case dispatch in scripts/setup.sh)"
     exit 1
     ;;
@@ -144,7 +177,9 @@ echo "Model dir:    ${MODEL_DIR}"
 # to confirm the new commit works on your config.
 GENESIS_PIN="${GENESIS_PIN:-7b9fd319}"
 
-if [[ "${SKIP_GENESIS:-0}" != "1" ]]; then
+if [[ "${NEEDS_GENESIS:-1}" != "1" ]]; then
+  echo "[genesis] ${MODEL_NAME} doesn't use Genesis — skipping clone."
+elif [[ "${SKIP_GENESIS:-0}" != "1" ]]; then
   if [[ -d "${GENESIS_DIR}/.git" ]]; then
     echo "[genesis] Already cloned at ${GENESIS_DIR} — fetching + checking out ${GENESIS_PIN} ..."
     (cd "${GENESIS_DIR}" && git fetch origin && git checkout "${GENESIS_PIN}" 2>&1 | tail -3)
@@ -251,8 +286,35 @@ echo ""
 # Real agent traffic (mixed code + narrative + tool schemas) will see lower
 # AL until z-lab tags training-complete. See docs/UPSTREAM.md for the watch
 # entry and re-test trigger.
-DFLASH_REPO="z-lab/Qwen3.6-27B-DFlash"
-DFLASH_SUBDIR="qwen3.6-27b-dflash"
+# Per-model DFlash repo + subdir defaults. Override (Gemma 4) set in the case
+# dispatch above.
+DFLASH_REPO="${DFLASH_REPO_OVERRIDE:-z-lab/Qwen3.6-27B-DFlash}"
+DFLASH_SUBDIR="${DFLASH_SUBDIR_OVERRIDE:-qwen3.6-27b-dflash}"
+
+# Always-required drafter (Gemma 4 MTP "assistant"). Empty for models without
+# a canonical drafter shipped alongside the target weights (Qwen3.6).
+if [[ -n "${ALWAYS_DRAFT_REPO}" ]] && [[ "${SKIP_MODEL:-0}" != "1" ]]; then
+  if [[ -d "${MODEL_DIR}/${ALWAYS_DRAFT_SUBDIR}" ]] \
+     && find "${MODEL_DIR}/${ALWAYS_DRAFT_SUBDIR}" -name "*.safetensors" -print -quit | grep -q .; then
+    echo "[draft]   ${MODEL_DIR}/${ALWAYS_DRAFT_SUBDIR} already has weights — skipping."
+  else
+    echo "[draft]   Downloading required drafter ${ALWAYS_DRAFT_REPO} ..."
+    mkdir -p "${MODEL_DIR}/${ALWAYS_DRAFT_SUBDIR}"
+    if command -v hf >/dev/null 2>&1; then
+      HF_HUB_ENABLE_HF_TRANSFER=1 HF_HUB_DISABLE_XET=1 \
+        hf download "${ALWAYS_DRAFT_REPO}" --local-dir "${MODEL_DIR}/${ALWAYS_DRAFT_SUBDIR}"
+    elif command -v huggingface-cli >/dev/null 2>&1; then
+      HF_HUB_ENABLE_HF_TRANSFER=1 HF_HUB_DISABLE_XET=1 \
+        huggingface-cli download "${ALWAYS_DRAFT_REPO}" --local-dir "${MODEL_DIR}/${ALWAYS_DRAFT_SUBDIR}"
+    else
+      echo "[draft]   ERROR: neither 'hf' nor 'huggingface-cli' available — cannot download drafter." >&2
+      exit 1
+    fi
+    echo "[draft]   Downloaded ${ALWAYS_DRAFT_REPO} to ${MODEL_DIR}/${ALWAYS_DRAFT_SUBDIR}"
+  fi
+  echo ""
+fi
+
 if [[ "${WITH_DFLASH_DRAFT:-0}" == "1" ]] && [[ "${SKIP_MODEL:-0}" != "1" ]]; then
   echo "[dflash]  WITH_DFLASH_DRAFT=1 — downloading ${DFLASH_REPO} ..."
   mkdir -p "${MODEL_DIR}/${DFLASH_SUBDIR}"
@@ -281,14 +343,42 @@ echo ""
 # clone needed. (Previous design required cloning a fork to /opt/ai/vllm-src/;
 # refactored 2026-05-03 to vendor the two files in-repo, fixing #37.)
 
+# Per-model "next steps" — different composes / served-model-name / port between models.
+case "${MODEL_NAME}" in
+  qwen3.6-27b)
+    SAMPLE_CONTAINER="vllm-qwen36-27b"
+    SAMPLE_COMPOSE_FLAGS_DUAL=" -f docker-compose.dual.yml"
+    SAMPLE_PORT="8020"
+    SAMPLE_MODEL_NAME="qwen3.6-27b-autoround"
+    NEXT_STEPS_NOTE="Or dual-card vLLM (Marlin patched files already vendored in-repo):
+  cd models/${MODEL_NAME}/vllm/compose && docker compose -f docker-compose.dual.yml up -d"
+    ;;
+  gemma-4-31b)
+    SAMPLE_CONTAINER="vllm-gemma-4-31b-mtp"
+    # Gemma 4 ships specific composes — pick MTP as the canonical default.
+    # Use scripts/switch.sh which auto-selects the right compose by variant.
+    SAMPLE_COMPOSE_FLAGS_DUAL=""
+    SAMPLE_PORT="8030"
+    SAMPLE_MODEL_NAME="gemma-4-31b-autoround"
+    NEXT_STEPS_NOTE="Available variants:
+  bash scripts/switch.sh vllm/gemma-mtp        # MTP drafter, TP=2, port 8030 (recommended)
+  bash scripts/switch.sh vllm/gemma-mtp-tp1    # MTP drafter, TP=1 (single-card; upstream-blocked on Ampere fp8)
+  bash scripts/switch.sh vllm/gemma-dflash     # DFlash drafter, TP=2, port 8032 (requires WITH_DFLASH_DRAFT=1)"
+    ;;
+esac
+
 echo "Next — single-card vLLM (default):"
-echo "  cd models/${MODEL_NAME}/vllm/compose && docker compose up -d"
-echo "  docker logs -f vllm-qwen36-27b"
+if [[ "${MODEL_NAME}" == "gemma-4-31b" ]]; then
+  echo "  bash scripts/switch.sh vllm/gemma-mtp"
+  echo "  docker logs -f ${SAMPLE_CONTAINER}"
+else
+  echo "  cd models/${MODEL_NAME}/vllm/compose && docker compose up -d"
+  echo "  docker logs -f ${SAMPLE_CONTAINER}"
+fi
 echo ""
-echo "Or dual-card vLLM (Marlin patched files already vendored in-repo):"
-echo "  cd models/${MODEL_NAME}/vllm/compose && docker compose -f docker-compose.dual.yml up -d"
+echo "${NEXT_STEPS_NOTE}"
 echo ""
 echo "Sanity test (after 'Application startup complete'):"
-echo "  curl -sf http://localhost:8020/v1/chat/completions \\"
+echo "  curl -sf http://localhost:${SAMPLE_PORT}/v1/chat/completions \\"
 echo "    -H 'Content-Type: application/json' \\"
-echo "    -d '{\"model\":\"qwen3.6-27b-autoround\",\"messages\":[{\"role\":\"user\",\"content\":\"Capital of France?\"}],\"max_tokens\":200}'"
+echo "    -d '{\"model\":\"${SAMPLE_MODEL_NAME}\",\"messages\":[{\"role\":\"user\",\"content\":\"Capital of France?\"}],\"max_tokens\":200}'"
