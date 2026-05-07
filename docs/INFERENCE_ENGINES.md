@@ -63,7 +63,7 @@ All five are actively developed. ktransformers is positioned as research but pro
 
 | Format | vLLM | llama.cpp | SGLang | ktransformers | ik_llama.cpp |
 |---|---|---|---|---|---|
-| **GGUF (Q*, K*, IQ*)** | ⚠️ Limited (recent UD-IQ1_S support) | ✅ Native | ⚠️ Recent | ⚠️ | ✅ Native |
+| **GGUF (Q*, K*, IQ*)** | ⚠️ **Experimental** ([official docs](https://docs.vllm.ai/en/stable/features/quantization/gguf/) flag "under-optimized"; single-file only — multi-file needs gguf-split merge; UD-* prefixes via [PR #39471](https://github.com/vllm-project/vllm/pull/39471) merged 2026-04-10; tokenizer conversion unstable on large-vocab models like Qwen3.6) | ✅ Native | ⚠️ Recent | ⚠️ | ✅ Native + IQ_K series |
 | **AutoRound INT4 (Marlin)** | ✅ + our [PR #40361](https://github.com/vllm-project/vllm/pull/40361) | ❌ | ✅ | ⚠️ | ❌ |
 | **GPTQ INT4** | ✅ | ❌ | ✅ | ✅ | ❌ |
 | **AWQ INT4** | ✅ | ❌ | ✅ | ⚠️ | ❌ |
