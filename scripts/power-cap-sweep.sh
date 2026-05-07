@@ -17,6 +17,7 @@
 #   sudo bash scripts/power-cap-sweep.sh --cooling water          # tag the run as water-cooled
 #   sudo bash scripts/power-cap-sweep.sh --cooling air            # tag as air-cooled
 #   sudo bash scripts/power-cap-sweep.sh --cooling aio            # tag as AIO/closed-loop
+#   sudo bash scripts/power-cap-sweep.sh --load-mode decode-concurrent --concurrency auto
 #   sudo bash scripts/power-cap-sweep.sh --load-mode decode-concurrent --concurrency 8
 #   sudo bash scripts/power-cap-sweep.sh --load-mode decode-concurrent --concurrency 8 --bench-runs 3
 #   sudo bash scripts/power-cap-sweep.sh --load-mode prefill-heavy
@@ -32,6 +33,9 @@
 #     Runs N concurrent chat completions and reports aggregate decode TPS. Use
 #     this for realistic multi-request serving load, especially on larger cards
 #     where decode-single is under-loaded and produces flat power curves.
+#     Pass --concurrency auto to calibrate the stream count before the sweep:
+#     the script probes increasing concurrency at the highest requested cap and
+#     selects the first N that reaches --load-target, or the best non-failing N.
 #
 #     ⚠️ VARIANCE CAVEAT: decode-concurrent defaults to n=1 measured batch per
 #     cap (one batch of N concurrent requests for narr, one for code). Aggregate
@@ -100,8 +104,11 @@ RESET=1              # 1 = reset to stock at end; 0 = leave at last cap
 COOLING="unspecified" # air|water|aio|unspecified — affects how to read the data
 STEP_SIZE=10          # increment in W between caps when --caps not specified (10W matches @laurimyllari's resolution)
 LOAD_MODE="decode-single"   # decode-single | decode-concurrent | prefill-heavy
-CONCURRENCY=4         # parallel streams when LOAD_MODE=decode-concurrent (matches typical compose --max-num-seqs)
+CONCURRENCY=4         # parallel streams, or "auto", when LOAD_MODE=decode-concurrent
 BENCH_RUNS=1          # repeated measured batches for decode-concurrent/prefill-heavy (median reported)
+MAX_CONCURRENCY_PROBE=32
+LOAD_TARGET=0.85      # target actual-power/cap ratio for --concurrency auto
+CALIBRATION_NOTE=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -112,6 +119,8 @@ while [ $# -gt 0 ]; do
     --load-mode)   LOAD_MODE="$2"; shift 2 ;;
     --concurrency) CONCURRENCY="$2"; shift 2 ;;
     --bench-runs)  BENCH_RUNS="$2"; shift 2 ;;
+    --max-concurrency-probe) MAX_CONCURRENCY_PROBE="$2"; shift 2 ;;
+    --load-target) LOAD_TARGET="$2"; shift 2 ;;
     --no-reset)    RESET=0; shift ;;
     -h|--help)
       sed -n '1,/^set -euo/p' "$0" | grep '^#' | sed 's/^# \?//'
@@ -125,12 +134,28 @@ case "$LOAD_MODE" in
   decode-single|decode-concurrent|prefill-heavy) ;;
   *) echo "[error] --load-mode must be one of: decode-single, decode-concurrent, prefill-heavy" >&2; exit 1 ;;
 esac
-if ! [[ "$CONCURRENCY" =~ ^[1-9][0-9]*$ ]]; then
-  echo "[error] --concurrency must be a positive integer" >&2
+CONCURRENCY_AUTO=0
+if [ "$CONCURRENCY" = "auto" ]; then
+  CONCURRENCY_AUTO=1
+elif ! [[ "$CONCURRENCY" =~ ^[1-9][0-9]*$ ]]; then
+  echo "[error] --concurrency must be a positive integer or 'auto'" >&2
   exit 1
 fi
 if ! [[ "$BENCH_RUNS" =~ ^[1-9][0-9]*$ ]]; then
   echo "[error] --bench-runs must be a positive integer" >&2
+  exit 1
+fi
+if ! [[ "$MAX_CONCURRENCY_PROBE" =~ ^[1-9][0-9]*$ ]]; then
+  echo "[error] --max-concurrency-probe must be a positive integer" >&2
+  exit 1
+fi
+if ! python3 - "$LOAD_TARGET" <<'PY' >/dev/null 2>&1
+import sys
+x = float(sys.argv[1])
+raise SystemExit(0 if 0 < x <= 1 else 1)
+PY
+then
+  echo "[error] --load-target must be a float in (0, 1]" >&2
   exit 1
 fi
 
@@ -223,6 +248,115 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+run_concurrency_probe() {
+  local n="$1"
+  local cap="$2"
+  local dir="$3"
+  local sample_file="$dir/samples-N${n}.csv"
+  local start_ns end_ns wall_s total_tokens fails tps stats actual_power ratio
+
+  (
+    while true; do
+      nvidia-smi --query-gpu=index,utilization.gpu,power.draw,temperature.gpu \
+        --format=csv,noheader,nounits -i "$GPU_INDEX" 2>/dev/null | head -1
+      sleep 0.25
+    done
+  ) > "$sample_file" &
+  local probe_sampler_pid=$!
+
+  local pids=()
+  start_ns=$(date +%s%N)
+  for i in $(seq 1 "$n"); do
+    local req_file="$dir/req-N${n}-${i}.json"
+    python3 - "$req_file" "$MODEL" "$n" "$i" <<'PY'
+import json
+import sys
+import time
+
+path, model, n, i = sys.argv[1:5]
+nonce = f"power-cap auto calibration nonce {time.time_ns()} N={n} stream={i}. "
+body = {
+    "model": model,
+    "messages": [{
+        "role": "user",
+        "content": nonce + "Write a detailed 300-word essay explaining transformer attention.",
+    }],
+    "max_tokens": 200,
+    "temperature": 0.6,
+}
+with open(path, "w", encoding="utf-8") as f:
+    json.dump(body, f)
+PY
+    curl -sS -f --max-time 90 "${URL}/v1/chat/completions" \
+      -H 'Content-Type: application/json' \
+      -d "@${req_file}" \
+      -o "$dir/out-N${n}-${i}.json" 2>>"$dir/probe-N${n}.log" &
+    pids+=("$!")
+  done
+
+  fails=0
+  for pid in "${pids[@]}"; do
+    if ! wait "$pid"; then
+      fails=$((fails + 1))
+    fi
+  done
+  end_ns=$(date +%s%N)
+  kill "$probe_sampler_pid" 2>/dev/null || true
+  wait "$probe_sampler_pid" 2>/dev/null || true
+
+  wall_s=$(python3 - "$start_ns" "$end_ns" <<'PY'
+import sys
+start, end = map(int, sys.argv[1:3])
+print((end - start) / 1e9)
+PY
+)
+  total_tokens=0
+  for i in $(seq 1 "$n"); do
+    if [ -s "$dir/out-N${n}-${i}.json" ]; then
+      local t
+      t=$(python3 -c "import json; print(json.load(open('$dir/out-N${n}-${i}.json')).get('usage',{}).get('completion_tokens',0))" 2>/dev/null || echo 0)
+      total_tokens=$((total_tokens + t))
+    fi
+  done
+  tps=$(python3 - "$total_tokens" "$wall_s" <<'PY'
+import sys
+tokens = int(sys.argv[1])
+wall = float(sys.argv[2])
+print(f"{tokens / max(wall, 0.001):.2f}")
+PY
+)
+  stats=$(python3 - "$sample_file" <<'PY'
+import sys
+samples = []
+with open(sys.argv[1]) as f:
+    for line in f:
+        try:
+            _, util, power, _ = [x.strip() for x in line.strip().split(",")]
+            if int(util) > 50:
+                samples.append(float(power))
+        except Exception:
+            pass
+if not samples:
+    print("?")
+else:
+    samples.sort()
+    print(f"{samples[len(samples)//2]:.2f}")
+PY
+)
+  actual_power="$stats"
+  ratio=$(python3 - "$actual_power" "$cap" <<'PY'
+import sys
+try:
+    power = float(sys.argv[1])
+    cap = float(sys.argv[2])
+    print(f"{power / max(cap, 0.001):.3f}")
+except Exception:
+    print("0.000")
+PY
+)
+  printf "%s %s %s %s %s %s\n" "$n" "$tps" "$actual_power" "$ratio" "$fails" "$wall_s"
+}
+
 # If --caps not specified, derive a sweep at STEP_SIZE-W increments across the
 # card's operating range. 10W default matches @laurimyllari's reference
 # resolution that produced the cleanest 4090 curve. Works on any card class:
@@ -254,6 +388,76 @@ fi
 NUM_CAPS=$(echo "$CAPS" | tr ',' '\n' | wc -l | tr -d ' ')
 # ~30s/cap including settle + bench (1 warmup + 2 runs × 500+400 tokens).
 EST_MIN=$(( (NUM_CAPS * 30 + 59) / 60 ))
+HIGHEST_CAP=$(python3 - "$CAPS" <<'PY'
+import sys
+print(max(int(float(x.strip())) for x in sys.argv[1].split(",") if x.strip()))
+PY
+)
+
+# Persistence mode (one-time; idempotent). Do this before optional
+# auto-calibration so clocks/caps behave consistently during probes.
+nvidia-smi -pm 1 -i "$GPU_INDEX" >/dev/null 2>&1 || true
+
+if [ "$LOAD_MODE" = "decode-concurrent" ] && [ "$CONCURRENCY_AUTO" -eq 1 ]; then
+  echo "[calibrate] --concurrency auto: probing stream count at ${HIGHEST_CAP}W cap"
+  echo "[calibrate] target load: actual power >= $(python3 - "$LOAD_TARGET" <<'PY'
+import sys
+print(f"{float(sys.argv[1]) * 100:.0f}%")
+PY
+) of cap; max probe concurrency: ${MAX_CONCURRENCY_PROBE}"
+  nvidia-smi -pl "$HIGHEST_CAP" -i "$GPU_INDEX" >/dev/null
+  sleep 2
+
+  CAL_DIR=$(mktemp -d /tmp/power-cap-autoload.XXXXXX)
+  BEST_N=1
+  BEST_TPS=0
+  BEST_POWER="?"
+  BEST_RATIO=0
+  SELECTED_N=""
+  for CANDIDATE in 1 2 4 6 8 12 16 24 32 48 64; do
+    if [ "$CANDIDATE" -gt "$MAX_CONCURRENCY_PROBE" ]; then
+      break
+    fi
+    read -r PROBE_N PROBE_TPS PROBE_POWER PROBE_RATIO PROBE_FAILS PROBE_WALL < <(
+      run_concurrency_probe "$CANDIDATE" "$HIGHEST_CAP" "$CAL_DIR"
+    )
+    echo "[calibrate] N=${PROBE_N} draw=${PROBE_POWER}W/$HIGHEST_CAP (${PROBE_RATIO}) aggregate=${PROBE_TPS} TPS fails=${PROBE_FAILS} wall=${PROBE_WALL}s"
+    if [ "$PROBE_FAILS" -gt 0 ]; then
+      echo "[calibrate] N=${PROBE_N} had request failures; stopping probe growth."
+      break
+    fi
+    IS_BETTER=$(python3 - "$PROBE_TPS" "$BEST_TPS" <<'PY'
+import sys
+print("1" if float(sys.argv[1]) > float(sys.argv[2]) else "0")
+PY
+)
+    if [ "$IS_BETTER" = "1" ]; then
+      BEST_N="$PROBE_N"
+      BEST_TPS="$PROBE_TPS"
+      BEST_POWER="$PROBE_POWER"
+      BEST_RATIO="$PROBE_RATIO"
+    fi
+    REACHED_TARGET=$(python3 - "$PROBE_RATIO" "$LOAD_TARGET" <<'PY'
+import sys
+print("1" if float(sys.argv[1]) >= float(sys.argv[2]) else "0")
+PY
+)
+    if [ "$REACHED_TARGET" = "1" ]; then
+      SELECTED_N="$PROBE_N"
+      echo "[calibrate] selected N=${SELECTED_N}: reached target load (${PROBE_RATIO})."
+      break
+    fi
+  done
+  if [ -z "$SELECTED_N" ]; then
+    SELECTED_N="$BEST_N"
+    echo "[calibrate] selected N=${SELECTED_N}: best non-failing aggregate TPS before target/load limit (draw=${BEST_POWER}W ratio=${BEST_RATIO})."
+    echo "[calibrate] If draw is still far below cap, increase --max-concurrency-probe or use --load-mode prefill-heavy."
+  fi
+  CALIBRATION_NOTE="auto-selected concurrency=${SELECTED_N} at ${HIGHEST_CAP}W cap (target=${LOAD_TARGET}, max-probe=${MAX_CONCURRENCY_PROBE})"
+  CONCURRENCY="$SELECTED_N"
+  rm -rf "$CAL_DIR"
+  echo
+fi
 
 echo "[setup] GPU $GPU_INDEX: $GPU_NAME ($GPU_VRAM MiB)"
 echo "[setup] power envelope: ${MIN_LIMIT}W (min) → ${STOCK_TDP}W (default) → ${MAX_LIMIT}W (max)"
@@ -266,6 +470,7 @@ else
   echo "[setup]            $CAPS W"
 fi
 echo "[setup] load mode: $LOAD_MODE$([ "$LOAD_MODE" = "decode-concurrent" ] && echo " (concurrency=$CONCURRENCY)")$([ "$LOAD_MODE" != "decode-single" ] && echo " (bench-runs=$BENCH_RUNS)")"
+[ -n "$CALIBRATION_NOTE" ] && echo "[setup] calibration: $CALIBRATION_NOTE"
 echo "[setup] estimated runtime: ~${EST_MIN} min (${NUM_CAPS} caps × ~30s/cap)"
 echo "[setup] reset at end: $([ $RESET -eq 1 ] && echo yes || echo no)"
 echo
@@ -330,9 +535,6 @@ PY
   echo
 fi
 
-# Persistence mode (one-time; idempotent)
-nvidia-smi -pm 1 -i "$GPU_INDEX" >/dev/null 2>&1 || true
-
 # Sweep
 RESULTS_FILE=/tmp/power-cap-summary.md
 {
@@ -341,6 +543,7 @@ RESULTS_FILE=/tmp/power-cap-summary.md
   echo "**GPU:** $GPU_NAME &nbsp; **VRAM:** ${GPU_VRAM} MiB &nbsp; **Stock TDP:** ${STOCK_TDP}W &nbsp; **Cooling:** ${COOLING}"
   echo "**Model:** \`${MODEL}\` &nbsp; **Engine:** \`${CONTAINER}\` &nbsp; **Endpoint:** ${URL}"
   echo "**Load mode:** \`${LOAD_MODE}\`$([ "$LOAD_MODE" = "decode-concurrent" ] && echo " (concurrency=${CONCURRENCY})")$([ "$LOAD_MODE" != "decode-single" ] && echo " (bench-runs=${BENCH_RUNS})")"
+  [ -n "$CALIBRATION_NOTE" ] && echo "**Calibration:** ${CALIBRATION_NOTE}"
   echo "**Date:** $(date -u +%Y-%m-%dT%H:%M:%S)Z"
   echo ""
   if [ "$COOLING" = "unspecified" ]; then
