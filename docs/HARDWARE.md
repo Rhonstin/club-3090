@@ -126,6 +126,8 @@ How `decode-single` is timed (the new default since 2026-05-07):
 | 5090 | air | vLLM `gemma-mtp` (TP=1) | Gemma 4 31B + MTP | **400W** ⭐ | 571.45 | 700.92 | **1.429** | [@apnar #86](https://github.com/noonghunna/club-3090/discussions/86#discussioncomment-16840610) |
 | 5090 | air | vLLM `gemma-mtp` (TP=1) | Gemma 4 31B + MTP | 510W (peak narr) | 619.45 | 723.82 | 1.215 | same |
 | 5090 | air | vLLM `gemma-mtp` (TP=1) | Gemma 4 31B + MTP | 600W (stock) | 600.65 | 756.67 | 1.103 | same |
+| 5090 | air | vLLM `long-text` (Qwen3.6 27B) | **prefill-heavy** | **400W** ⭐ | 247.33 | (n/a) | **0.618** | [@apnar #86](https://github.com/noonghunna/club-3090/discussions/86#discussioncomment-16844473) |
+| 5090 | air | vLLM `long-text` (Qwen3.6 27B) | **prefill-heavy** | 600W (stock) | 294.63 | (n/a) | 0.491 | same — **599.98W actual draw, full TDP saturation** |
 
 ⭐ = peak TPS/W efficiency on that rig.
 
@@ -136,6 +138,19 @@ For rigs where we have full 10W-resolution sweeps, the curves below show TPS + T
 ![5090 + Gemma 4 + MTP power-cap efficiency curve (apnar)](img/power-cap-5090-gemma4.png)
 
 *5090 air-cooled + Gemma 4 31B + MTP, 21-cap sweep at 10W resolution. Yellow callout: 400W sweet spot (1.43 TPS/W). Red-shaded: 530-600W = workload-limited, ~547W max actual draw regardless of cap. Source data: [disc #86](https://github.com/noonghunna/club-3090/discussions/86#discussioncomment-16840610) (@apnar). Source script: [`img/power-cap-5090-gemma4.py`](img/power-cap-5090-gemma4.py).*
+
+![5090 + Qwen3.6 + vLLM prefill-heavy power-cap efficiency curve (apnar)](img/power-cap-5090-qwen36-prefill.png)
+
+*5090 air-cooled + Qwen3.6-27B AutoRound INT4 + vLLM long-text compose, 21-cap sweep, **prefill-heavy** workload (~50K-token prompt + max_tokens=10). **At 600W cap, actual draw = 599.98W (99.997% cap-respect)** — proving the decode-bound ~547W ceiling on this card is a memory-bandwidth limit, not a hardware/firmware cap. Prefill is compute-bound and saturates the full 600W TDP cleanly. Source data: [disc #86](https://github.com/noonghunna/club-3090/discussions/86#discussioncomment-16844473) (@apnar). Source script: [`img/power-cap-5090-qwen36-prefill.py`](img/power-cap-5090-qwen36-prefill.py).*
+
+**Per-workload-class power ceilings on the 5090 (validated cross-workload by @apnar)**:
+
+| Workload class | Bottleneck | Max sustainable draw | Best efficiency cap |
+|---|---|---:|---:|
+| **Decode** (chat / generation, decode-concurrent N=4 or N=8) | Memory bandwidth | ~547-551W | 400W (1.43 TPS/W) |
+| **Prefill** (RAG, long-context, batch) | Compute (matmul) | **~600W (full TDP)** | 400W (0.618 TPS/W) |
+
+The cross-workload pattern: **both workload classes have efficiency knee at 400W (67% of stock TDP)**, but prefill needs the full 600W envelope to maximize absolute throughput while decode never uses more than ~550W regardless of cap. **Practical implication**: cap your 5090 at 400W for max efficiency on chat workloads (you lose <5% TPS); for prefill-heavy long-context workloads, leave at stock 600W if you want max throughput, accept ~30% efficiency cost.
 
 ![4090 + Qwen3.6-27B + llama.cpp power-cap efficiency curve (laurimyllari)](img/power-cap-4090-qwen36.png)
 
