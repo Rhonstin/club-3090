@@ -2,6 +2,18 @@
 
 Dated history for Qwen3.6-27B configs in this repo. Combines the single-card and dual-card timelines (both were previously separate repos; consolidated here 2026-04-28).
 
+## 2026-05-07 — NVLink + DFlash compose variants added (#92, #96)
+
+Two new community-contributed composes from @danbedford for 2× 3090 with NVLink bridge:
+
+- **`docker-compose.dual-nvlink-dflash.yml`** (port 8018) — 185K ctx + DFlash N=5 + vision. NCCL P2P over NVLink + custom_all_reduce ENABLED. Drops `expandable_segments=True` (NVLink startup-crash fix from JusefPol/PR #31). Bench (2× 3090 NVLink, 230W cap): **101.55 / 163.33 narr/code wall TPS** (CV 1.8%/1.9%), **+17% narr / +16% code over his PCIe `dual-dflash` baseline** of 86.62 / 141.02. PASSES verify-full 8/8 + verify-stress 7/7 + continuous soak (0 err, 100% retention).
+
+- **`docker-compose.dual-nvlink-dflash-noviz.yml`** (port 8019) — text-only variant of the above. Drops MoonViT to free ~0.78 GB/card → max_model_len pushed from 185K to **188K**. Empirically determined: 189K had 1/3 success rate (flaky on fresh reboot), 188K is the stable ceiling. Bench: **103.24 / 167.45 narr/code wall TPS** (CV 2.2%/3.6%), **+17% narr / +17% code over PCIe `dual-dflash-noviz` baseline** (88.31 / 142.79). PASSES same validation chain.
+
+Both variants registered in `scripts/launch.sh` and `scripts/switch.sh`. Sibling-list headers updated across `dual.yml`, `dual-nvlink.yml`, `dual-dflash.yml`, `dual-dflash-noviz.yml` for cross-reference. Marked **community-contributed, experimental** in headers.
+
+Note: both composes use `--tool-call-parser qwen3_coder` but are direct-cmd (no entrypoint script), so they don't currently receive the `qwen3coder_tool_parser_deferred_commit.py` sidecar shipped 2026-05-07 for issue #72. Consistent with the existing direct-cmd pattern (`dual.yml`, `dual-dflash.yml` also lack the sidecar). If the SSE-silence bug fires on these variants, follow-up PR can add an entrypoint script.
+
 ## 2026-05-06 — `PYTORCH_CUDA_ALLOC_CONF` override knob added to 14 composes
 
 Follow-up to the v7.72.2-uplift pin bump: a single-card RTX 3090 Ti rig on WSL2 (driver 596.36) hit `gptq_marlin_repack` boot crashes (`CUDA driver error: device not ready`) on the new nightly. The minimal compose (no Genesis, no spec-decode, no TQ3 KV) reproduced cleanly with just `--quantization auto_round`, and `CUDA_LAUNCH_BLOCKING=1` did not move the failure site (rules out async-residual error from a prior kernel).
