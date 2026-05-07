@@ -17,7 +17,7 @@ If you have one or two RTX 3090s and want to run modern LLMs at home, in a homel
 
 **First time here?** → [Models](#supported-models) — pick yours.
 **Already running, want to compare engines?** → [docs/engines/](docs/engines/)
-**Picking an engine** (vLLM vs llama.cpp vs SGLang vs ktransformers)? → [docs/INFERENCE_ENGINES.md](docs/INFERENCE_ENGINES.md)
+**Picking an engine** (vLLM / llama.cpp / SGLang / ktransformers / ik_llama.cpp)? → [docs/INFERENCE_ENGINES.md](docs/INFERENCE_ENGINES.md)
 **Hardware questions** (does this work on a 4090, do I need NVLink)? → [docs/HARDWARE.md](docs/HARDWARE.md)
 **Don't know what TPS / KV / MTP mean?** → [docs/GLOSSARY.md](docs/GLOSSARY.md)
 
