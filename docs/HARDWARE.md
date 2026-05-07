@@ -118,6 +118,10 @@ Three flags matter for anchor data:
 
 ⭐ = peak TPS/W efficiency on that rig.
 
+![5090 + Gemma 4 + MTP power-cap efficiency curve (apnar)](img/power-cap-5090-gemma4.png)
+
+*5090 air-cooled + Gemma 4 31B + MTP, 21-cap sweep at 10W resolution. Yellow callout: 400W sweet spot (1.43 TPS/W). Red-shaded: 530-600W = workload-limited, ~547W max actual draw regardless of cap. Source data: [disc #86](https://github.com/noonghunna/club-3090/discussions/86#discussioncomment-16840610) (@apnar). Source script: [`img/power-cap-5090-gemma4.py`](img/power-cap-5090-gemma4.py).*
+
 **Cross-rig pattern**: efficiency knee falls at **~60-85% of stock TDP** across consumer Ampere/Ada — start there for a new card class and zoom in. Ada (4090) is proportionally more aggressive than Ampere (3090) — 4090 cuts 33% of stock TDP for ~7% TPS loss; 3090 cuts 15% of stock for ~5% loss.
 
 **5090 compute-saturation note**: @apnar's data shows the 5090 caps at ~430W actual draw on Qwen3.6-27B even when allowed up to 575W — the workload is compute-saturated, not power-saturated. So 400W cap delivers ~equal TPS to 575W. **Confirmed cross-workload on Gemma 4 31B + MTP**: 21-cap sweep at 10W resolution shows actual draw plateaus at ~547W beyond 530W cap (no thermal throttle, GPU temp peaked 66°C — compute / memory bandwidth limit, not thermal). **Same 400W sweet spot** despite ~5× different absolute TPS class. Pattern: the 5090 + consumer-air-cooled platform appears to have a workload-independent ~400W efficiency knee on this rig class.
