@@ -16,7 +16,7 @@ When per-token-head fp8 KV (`--kv-cache-dtype fp8_e5m2`) is requested, the layou
 `unify_kv_cache_spec_page_size()` because the resulting page sizes are 520 vs 1032 —
 they don't share a clean 1:2 ratio that the allocator's slab structure can absorb.
 
-Without this PR, `gemma-mtp.yml` and friends are forced to `--kv-cache-dtype auto`
+Without this PR, `dual.yml` and friends are forced to `--kv-cache-dtype auto`
 (BF16 KV) on Ampere, which caps usable context at ~32K (vs Gemma 4's natural 1M).
 
 The PR's fix:
@@ -87,9 +87,9 @@ Both target `gemma4_tool_parser.py` at non-overlapping regions.
 
 ## Composes that mount this
 
-Currently: `docker-compose.gemma-mtp-int8.yml` (per-token-head INT8 KV by default
+Currently: `docker-compose.dual-int8.yml` (per-token-head INT8 KV by default
 on Ampere; users on Ada/Blackwell can override `KV_DTYPE=fp8_per_token_head`).
 
-The bf16-KV variants (`docker-compose.gemma-mtp.yml`, `docker-compose.gemma-mtp-tp1.yml`)
+The bf16-KV variants (`docker-compose.dual.yml`, `docker-compose.single.yml`)
 do NOT mount this overlay — they don't need the per-token-head KV path. Keep them
 overlay-free as the safe fallback.

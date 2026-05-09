@@ -5,7 +5,7 @@
 #   Drafter:   z-lab Gemma 4 DFlash n=7 (block-diffusion drafter, vLLM PR #41703 vendored overlay)
 #   KV:        bfloat16 (forced for drafter compatibility)
 #   Vision:    yes
-#   Max ctx:   32K (BF16 ceiling — for 262K code-optimal use gemma-dflash-int8.yml)
+#   Max ctx:   32K (BF16 ceiling — for 262K code-optimal use dual-dflash-int8.yml)
 #   Genesis:   N/A — Genesis is Qwen3-Next-specific
 #   Best for:  Peak code TPS on Gemma 4 (105/177 — +18% code over MTP) ⭐
 # ---------------------------------------------------------------------------
@@ -83,7 +83,7 @@ services:
       # ---- vLLM PR #41703 overlay (jianc99/dflash-gemma4-fix branch) ----
       # 12 modified files. RO-mount each over installed vllm paths.
       # Drop this whole block when PR merges + propagates. Source: ../patches/vllm-gemma4-dflash/
-      # NOTE: this overlay CONFLICTS with the gemma-mtp.yml overlay (#41745) on
+      # NOTE: this overlay CONFLICTS with the dual.yml overlay (#41745) on
       # speculative.py + gpu_model_runner.py — run only one variant at a time.
       - ../patches/vllm-gemma4-dflash/config/attention.py:/usr/local/lib/python3.12/dist-packages/vllm/config/attention.py:ro
       - ../patches/vllm-gemma4-dflash/config/speculative.py:/usr/local/lib/python3.12/dist-packages/vllm/config/speculative.py:ro

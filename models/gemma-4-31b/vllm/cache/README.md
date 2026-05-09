@@ -10,5 +10,5 @@ Mirrors the pattern in `models/qwen3.6-27b/vllm/cache/`.
 
 Safe to delete (`rm -rf cache/triton/* cache/torch_compile/*`) — only
 costs you one slow cold start to regenerate. The two compose variants
-(`gemma-mtp.yml` TP=2 and `gemma-mtp-tp1.yml` TP=1) share this directory
+(`dual.yml` TP=2 and `single.yml` TP=1) share this directory
 but key off their own config hash, so no cross-contamination.

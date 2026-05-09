@@ -1,4 +1,16 @@
 # ===========================================================================
+# Profile (at-a-glance):
+#   Model:     Carnice-V2-27B (Hermes agentic fine-tune of Qwen3.6-27B,
+#              INT4 + BF16 MTP overlay, HF: wasifb/Carnice_V2_27B_INT4_BF16MTP)
+#   Topology:  Dual 3090 PCIe (TP=2, no NVLink)
+#   Drafter:   MTP n=3 (BF16 MTP overlay grafted onto Carnice's stripped INT4)
+#   KV:        fp8_e5m2
+#   Vision:    yes
+#   Max ctx:   262K
+#   Genesis:   v7.72.2 (full PROD env stack)
+#   Status:    AL=2.0 (vs Lorbus's 3.4-3.8) — TPS 72/80, working but suboptimal
+#   Best for:  Hermes-style agentic tool-calling specialization
+# ---------------------------------------------------------------------------
 # Carnice-V2-27B + BF16 MTP overlay — dual RTX 3090 variant.
 #
 # Carnice is a Hermes-style agentic fine-tune of Qwen3.6-27B. This variant

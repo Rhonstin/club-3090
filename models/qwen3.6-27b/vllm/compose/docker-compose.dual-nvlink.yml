@@ -1,4 +1,14 @@
 # ===========================================================================
+# Profile (at-a-glance):
+#   Model:     Qwen3.6-27B (Lorbus AutoRound INT4 + BF16 mtp.fc preserved)
+#   Topology:  Dual 3090 + NVLink bridge (TP=2, NCCL P2P over NVLink)
+#   Drafter:   MTP n=3 (built-in)
+#   KV:        fp8_e5m2
+#   Vision:    yes
+#   Max ctx:   262K
+#   Genesis:   v7.72.2
+#   Best for:  Users with the NVLink bridge — +15% narr / +15% code over PCIe-only dual.yml
+# ---------------------------------------------------------------------------
 # Dual RTX 3090 with NVLink — opt-in variant for users with the bridge installed.
 # Mirrors docker-compose.dual.yml but enables NCCL P2P over NVLink for faster
 # allreduce, and re-enables vLLM's custom all-reduce kernel (which `dual.yml`

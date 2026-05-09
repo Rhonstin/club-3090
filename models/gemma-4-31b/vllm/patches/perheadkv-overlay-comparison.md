@@ -64,7 +64,7 @@ Worker-only PR #40391 overlay test:
 
 ```bash
 MODEL_DIR=/mnt/models/huggingface docker compose \
-  -f /opt/ai/github/club-3090/models/gemma-4-31b/vllm/compose/docker-compose.gemma-mtp.yml \
+  -f /opt/ai/github/club-3090/models/gemma-4-31b/vllm/compose/docker-compose.dual.yml \
   -f /tmp/gemma4-pr40391-perheadkv.override.yml \
   up --force-recreate
 ```
@@ -80,7 +80,7 @@ Hybrid diagnostic overlay test:
 
 ```bash
 MODEL_DIR=/mnt/models/huggingface docker compose \
-  -f /opt/ai/github/club-3090/models/gemma-4-31b/vllm/compose/docker-compose.gemma-mtp.yml \
+  -f /opt/ai/github/club-3090/models/gemma-4-31b/vllm/compose/docker-compose.dual.yml \
   up --force-recreate
 ```
 

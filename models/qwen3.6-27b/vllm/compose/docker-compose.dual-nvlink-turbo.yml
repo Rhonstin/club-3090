@@ -1,4 +1,14 @@
 # ===========================================================================
+# Profile (at-a-glance):
+#   Model:     Qwen3.6-27B (Lorbus AutoRound INT4 + BF16 mtp.fc preserved)
+#   Topology:  Dual 3090 + NVLink (TP=2, NCCL P2P over NVLink)
+#   Drafter:   MTP n=3 (built-in)
+#   KV:        turboquant_3bit_nc (TQ3, 0.375 bytes/token)
+#   Vision:    yes
+#   Max ctx:   262K
+#   Genesis:   v7.72.2 (full PROD env stack)
+#   Best for:  NVLink + multi-tenant — +11% narr / +12% code over PCIe-only dual-turbo.yml
+# ---------------------------------------------------------------------------
 # Dual-card Turbo with NVLink — TP=2 + TurboQuant KV (turboquant_3bit_nc) + MTP n=3
 # + Genesis v7.72.2 + NVLink P2P.
 #

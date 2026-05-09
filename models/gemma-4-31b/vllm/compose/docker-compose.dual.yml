@@ -1,17 +1,16 @@
 # ===========================================================================
 # Profile (at-a-glance):
 #   Model:     Gemma 4 31B (Intel AutoRound INT4)
-#   Topology:  Single 3090 (TP=1) — ⚠️ BOOT-OOMs on 24 GB Ampere; for 32 GB+ only
-#   Drafter:   MTP n=3 (Google's official `gemma-4-31B-it-assistant`)
-#   KV:        bfloat16 (fp8 dispatch blocked on Ampere — Triton fp8e4nv unsupported on sm_86)
+#   Topology:  Dual 3090 PCIe (TP=2, no NVLink) — single-card boot-OOMs on 24 GB
+#   Drafter:   MTP n=3 (Google's official `gemma-4-31B-it-assistant`, BF16 0.5B)
+#   KV:        bfloat16 (2 bytes/token)
 #   Vision:    yes
-#   Max ctx:   ~16K (theoretical) — boot fails before serving on 24 GB
+#   Max ctx:   32K (BF16 ceiling — for 262K use dual-int8.yml)
 #   Genesis:   N/A — Genesis is Qwen3-Next-specific
-#   Best for:  Single-card 32 GB+ GPUs (RTX 5090 32 GB validated by @apnar disc #67)
-#              For 24 GB Ampere, use gemma-mtp.yml (dual-card) instead.
+#   Best for:  Gemma 4 dual-card default — vision + tools + balanced TPS ⭐
 # ---------------------------------------------------------------------------
 # Gemma-4-31B-it (Intel AutoRound INT4) + Google MTP "assistant" drafter
-# Single-card TP=1 + bfloat16 KV — preserved for 32 GB+ GPUs (5090, A6000).
+# 2× RTX 3090 TP=2 + bfloat16 KV + 32K ctx + 4 streams.
 #
 # Status: COMMUNITY-CONTRIBUTED, EXPERIMENTAL.
 #   First Ampere consumer cross-rig data on Google's Gemma 4 MTP drafters
@@ -47,12 +46,12 @@
 # Smaller KV pool than fp8 but at 32K test ctx that's not the bottleneck.
 # ===========================================================================
 services:
-  vllm-gemma-4-31b-mtp-tp1:
+  vllm-gemma-4-31b-mtp:
     image: vllm/vllm-openai:nightly-1acd67a795ebccdf9b9db7697ae9082058301657
-    container_name: vllm-gemma-4-31b-mtp-tp1
+    container_name: vllm-gemma-4-31b-mtp
     restart: "no"
     ports:
-      - "${PORT:-8031}:8000"
+      - "${PORT:-8030}:8000"
     volumes:
       - ${MODEL_DIR:-../../../../models-cache}:/root/.cache/huggingface
       # torch.compile + Triton kernel caches — first boot warms (~5-7 min);
@@ -92,29 +91,24 @@ services:
       - --served-model-name
       - gemma-4-31b-autoround
       - --tensor-parallel-size
-      - "1"
-      # Single-card: weights ~16 GB + drafter ~1 GB + bf16 KV at 16K + vision +
-      # activations needs to fit in 24 GB. Drop vision via limit-mm-per-prompt
-      # to reclaim ~1.5 GB and skip the mm-token-budget assertion.
-      # Drop max-model-len 32K → 16K for headroom.
+      - "2"
+      - --disable-custom-all-reduce
+      # max-model-len ceiling (TP=2, BF16 KV):
+      #   32K ctx @ 0.92 → KV pool ~38K tokens (shipped default — matches bench above)
+      #   48K ctx @ 0.95 → KV pool ~50K tokens (safe — MTP drafter is 0.5B vs DFlash's 2.9B,
+      #                                          slightly more headroom than dual-dflash.yml)
+      #   65K ctx @ 0.95 → KV pool ~60K tokens (max practical; 65K request partially overflows)
+      # fp8 KV blocked on Ampere — see header comment.
+      # Override: MAX_MODEL_LEN=49152 GPU_MEMORY_UTILIZATION=0.95 bash scripts/switch.sh vllm/gemma-mtp
       - --max-model-len
-      - "${MAX_MODEL_LEN:-8192}"
+      - "${MAX_MODEL_LEN:-32768}"
       - --gpu-memory-utilization
-      - "${GPU_MEMORY_UTILIZATION:-0.95}"
+      - "${GPU_MEMORY_UTILIZATION:-0.92}"
       - --max-num-seqs
-      - "256"
-      # max_tokens_per_mm_item=2496 must fit in batched tokens — even with
-      # --limit-mm-per-prompt image=0, the encoder-budget computation still
-      # asserts. 4096 (above 2496 floor) leaves more profiling room than 8192.
+      - "4"
+      # Vision tower: max_tokens_per_mm_item=2496 must fit in batched tokens.
       - --max-num-batched-tokens
       - "4096"
-      - --limit-mm-per-prompt
-      - '{"image":0,"audio":0}'
-      # fp8 KV per vLLM recipe — halves KV pool footprint vs bf16 default.
-      # Risk on Ampere: explicit fp8_e4m3 hits Triton "fp8e4nv not supported"
-      # on sm_86 in earlier tests. Unsuffixed `fp8` may dispatch differently.
-      - --kv-cache-dtype
-      - fp8
       - --trust-remote-code
       # Tool-call support per vLLM Gemma 4 recipe — required for any soak /
       # agent traffic that includes a `tools: [...]` array. Without these,

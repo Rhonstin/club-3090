@@ -51,7 +51,7 @@ fi
 # ALWAYS_DRAFT_REPO + ALWAYS_DRAFT_SUBDIR: a drafter that this model REQUIRES
 # (vs the optional WITH_DFLASH_DRAFT path). Empty for Qwen3.6 (no required
 # drafter); Google MTP drafter for Gemma 4 (canonical recipe per Gemma 4 docs +
-# our gemma-mtp.yml compose).
+# our dual.yml compose).
 ALWAYS_DRAFT_REPO=""
 ALWAYS_DRAFT_SUBDIR=""
 
@@ -73,7 +73,7 @@ case "${MODEL_NAME}" in
     # entirely on this path.
     NEEDS_GENESIS=0
     # Google ships the MTP drafter with the canonical Gemma 4 recipe; our
-    # gemma-mtp.yml compose requires it. Always-fetch (no opt-in flag).
+    # dual.yml compose requires it. Always-fetch (no opt-in flag).
     ALWAYS_DRAFT_REPO="google/gemma-4-31B-it-assistant"
     ALWAYS_DRAFT_SUBDIR="gemma-4-31b-it-assistant"
     # DFlash drafter is z-lab/gemma-4-31B-it-DFlash (different repo than

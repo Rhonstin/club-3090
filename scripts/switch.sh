@@ -106,9 +106,9 @@ declare -A VARIANTS=(
   [vllm/dual-nvlink-turbo]="vllm|models/qwen3.6-27b/vllm/compose|docker-compose.dual-nvlink-turbo.yml"
   [vllm/dual-nvlink-dflash]="vllm|models/qwen3.6-27b/vllm/compose|docker-compose.dual-nvlink-dflash.yml"
   [vllm/dual-nvlink-dflash-noviz]="vllm|models/qwen3.6-27b/vllm/compose|docker-compose.dual-nvlink-dflash-noviz.yml"
-  [vllm/gemma-mtp]="vllm|models/gemma-4-31b/vllm/compose|docker-compose.gemma-mtp.yml"
-  [vllm/gemma-mtp-tp1]="vllm|models/gemma-4-31b/vllm/compose|docker-compose.gemma-mtp-tp1.yml"
-  [vllm/gemma-dflash]="vllm|models/gemma-4-31b/vllm/compose|docker-compose.gemma-dflash.yml"
+  [vllm/gemma-mtp]="vllm|models/gemma-4-31b/vllm/compose|docker-compose.dual.yml"
+  [vllm/gemma-mtp-tp1]="vllm|models/gemma-4-31b/vllm/compose|docker-compose.single.yml"
+  [vllm/gemma-dflash]="vllm|models/gemma-4-31b/vllm/compose|docker-compose.dual-dflash.yml"
   [llamacpp/default]="llamacpp|models/qwen3.6-27b/llama-cpp/compose|docker-compose.yml"
   [llamacpp/concurrent]="llamacpp|models/qwen3.6-27b/llama-cpp/compose|docker-compose.concurrent.yml"
 )

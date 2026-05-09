@@ -78,16 +78,16 @@ Once both are merged + propagated to a nightly tag, this overlay can be removed 
 ## Companion overlay
 
 Used in tandem with [`../vllm-pr40391-rebased/`](../vllm-pr40391-rebased/) (Gemma 4
-per-token-head KV cache page-size alignment) on the `docker-compose.gemma-mtp-int8.yml`
+per-token-head KV cache page-size alignment) on the `docker-compose.dual-int8.yml`
 compose. Different file surfaces (this is `tool_parsers/`, that is `model_executor/` +
 `v1/core/` + `v1/worker/`), so they don't conflict.
 
 ## Composes that mount this
 
-`docker-compose.gemma-mtp-int8.yml` — the per-token-head KV variant (INT8 default on
+`docker-compose.dual-int8.yml` — the per-token-head KV variant (INT8 default on
 Ampere, FP8 PTH override available for Ada/Blackwell).
 
-Optionally consider mounting on `docker-compose.gemma-mtp.yml` and `gemma-mtp-tp1.yml` too
+Optionally consider mounting on `docker-compose.dual.yml` and `single.yml` too
 since these tool-parser fixes don't require any specific KV format — they help any
 Gemma 4 + MTP streaming tool-call workflow. Hold pending validation that the patches
 don't introduce regressions on the bf16 KV path.

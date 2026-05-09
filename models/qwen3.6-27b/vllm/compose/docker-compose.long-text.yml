@@ -8,6 +8,18 @@
 #     escapes the cliff) or llamacpp recipes (different engine, no
 #     Cliff 2b). See docs/CLIFFS.md for the full diagnosis.
 # ===========================================================================
+# Profile (at-a-glance):
+#   Model:     Qwen3.6-27B (Lorbus AutoRound INT4 + BF16 mtp.fc preserved)
+#   Topology:  Single 3090 (TP=1)
+#   Drafter:   MTP n=3 (built-in)
+#   KV:        turboquant_3bit_nc (TQ3)
+#   Vision:    no (text-only — frees VRAM for ctx)
+#   Max ctx:   180K (was 214K pre-Cliff-2b; reduced for safety)
+#   Genesis:   v7.72.2
+#   Status:    ⚠️ NOT IDE-agent safe (Cliff 2b at >50K — see warning above)
+#   Best for:  RAG / single-shot summarization at <25K accumulated ctx;
+#              for IDE agents use tools-text.yml or dual.yml instead
+# ---------------------------------------------------------------------------
 # Long-text variant — 214K context, text-only (no vision).
 #
 # ⚠️ NOT SAFE FOR IDE-AGENT WORKLOADS (Cline / OpenCode / Roo / Claude Code /

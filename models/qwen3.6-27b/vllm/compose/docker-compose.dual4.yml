@@ -1,4 +1,14 @@
 # ===========================================================================
+# Profile (at-a-glance):
+#   Model:     Qwen3.6-27B (Lorbus AutoRound INT4 + BF16 mtp.fc preserved)
+#   Topology:  Quad 3090 PCIe (TP=4) — see MULTI_CARD.md for derivation
+#   Drafter:   MTP n=3 (built-in)
+#   KV:        fp8_e5m2
+#   Vision:    yes
+#   Max ctx:   262K
+#   Genesis:   v7.72.2 (full PROD env stack)
+#   Best for:  4-card TP=4 baseline — high concurrency, max KV pool size
+# ---------------------------------------------------------------------------
 # Quad RTX 3090 — TP=4 baseline. Qwen3.6-27B + MTP n=3 + fp8 KV + vision.
 #
 # Community-validated on Whamp's 4× RTX 3090 PCIe rig (discussion #26),

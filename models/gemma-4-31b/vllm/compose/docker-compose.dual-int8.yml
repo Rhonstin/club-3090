@@ -24,10 +24,10 @@
 #   TP=4) and @noonghunna (sm_86 Ampere — this rig). Local rebase resolves
 #   the conflict against post-Mamba-hybrid-support main.
 #
-# Companion to gemma-mtp.yml:
-#   gemma-mtp.yml         — bf16 KV, 32K ctx (safe default, no overlays)
-#   gemma-mtp-int8.yml    — INT8 per-token-head KV, ~120K ctx (this file)
-#   gemma-mtp-tp1.yml     — TP=1 single-card (boot OOM on Ampere)
+# Companion to dual.yml:
+#   dual.yml         — bf16 KV, 32K ctx (safe default, no overlays)
+#   dual-int8.yml    — INT8 per-token-head KV, ~120K ctx (this file)
+#   single.yml     — TP=1 single-card (boot OOM on Ampere)
 #
 # Hardware × per-token-head dtype compatibility:
 #
@@ -61,7 +61,7 @@
 #   to a 1040-byte factor and routes standard attention through a new
 #   `get_padded_attention_kv_cache_shape` helper to unblock this family.
 #
-#   Without PR #40391, gemma-mtp.yml is forced to bf16 KV + 32K ctx ceiling
+#   Without PR #40391, dual.yml is forced to bf16 KV + 32K ctx ceiling
 #   (KV pool exhausted at higher). With PR #40391 + INT8 PTH KV, ctx
 #   ceiling lifts to ~120K (4×) at the same TP=2 mem-util budget.
 #
@@ -69,7 +69,7 @@
 #   narrative ~109 wall TPS (parity with bf16 path; KV format affects
 #                            ctx ceiling, not per-token TPS materially)
 #   code      ~142 wall TPS
-#   Max ctx   ~120K (4× lift vs gemma-mtp.yml's 32K)
+#   Max ctx   ~120K (4× lift vs dual.yml's 32K)
 #
 # Models:
 #   target: Intel/gemma-4-31B-it-int4-AutoRound  (21.2 GB, vision preserved)
@@ -99,7 +99,7 @@ services:
       - ${MODEL_DIR:-../../../../models-cache}:/root/.cache/huggingface
       # torch.compile + Triton kernel caches — first boot warms (~5-7 min);
       # subsequent boots reuse cached graphs (~3 min). Separate cache dirs
-      # from gemma-mtp.yml because the overlay file set differs (cudagraph
+      # from dual.yml because the overlay file set differs (cudagraph
       # capture would re-key on the patched kernel paths anyway).
       - ../cache/torch_compile_int8:/root/.cache/vllm/torch_compile_cache
       - ../cache/triton_int8:/root/.triton/cache

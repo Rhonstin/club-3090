@@ -1,4 +1,14 @@
 # ===========================================================================
+# Profile (at-a-glance):
+#   Model:     Qwen3.6-27B (Lorbus AutoRound INT4 + BF16 mtp.fc preserved)
+#   Topology:  Quad 3090 PCIe (TP=4)
+#   Drafter:   z-lab DFlash N=5 (block-diffusion drafter)
+#   KV:        fp8_e5m2 (forced bf16 for drafter via --dtype bfloat16)
+#   Vision:    yes
+#   Max ctx:   262K
+#   Genesis:   none — DFlash drafter handles spec-decode independently
+#   Best for:  4-card peak code TPS path
+# ---------------------------------------------------------------------------
 # Quad RTX 3090 DFlash — TP=4 + DFlash N=5 + 262K ctx + vision.
 #
 # 4-card full-context DFlash variant validated on Whamp's 4× RTX 3090 PCIe

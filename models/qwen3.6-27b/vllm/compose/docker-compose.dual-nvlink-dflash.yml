@@ -1,4 +1,14 @@
 # ===========================================================================
+# Profile (at-a-glance):
+#   Model:     Qwen3.6-27B (Lorbus AutoRound INT4 + BF16 mtp.fc preserved)
+#   Topology:  Dual 3090 + NVLink (TP=2, NCCL P2P over NVLink)
+#   Drafter:   z-lab DFlash N=5 (block-diffusion drafter)
+#   KV:        FP16 (forced for DFlash drafter compatibility)
+#   Vision:    yes
+#   Max ctx:   185K
+#   Genesis:   none — DFlash drafter handles spec-decode independently
+#   Best for:  NVLink + peak code TPS — +17% over PCIe-only dual-dflash.yml
+# ---------------------------------------------------------------------------
 # Dual RTX 3090 with NVLink + DFlash — TP=2 + DFlash N=5 spec-decode + 185K ctx
 # + vision + NVLink P2P for faster allreduce.
 #

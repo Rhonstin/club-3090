@@ -2,7 +2,7 @@
 
 Vendored Python files from [vllm-project/vllm#41703](https://github.com/vllm-project/vllm/pull/41703) — adds first-party **DFlash** (block-diffusion) speculative-decoding support for Gemma 4 + Qwen3.5 models, with the [`z-lab/gemma-4-31B-it-DFlash`](https://huggingface.co/z-lab/gemma-4-31B-it-dflash) drafter (2.9 GB BF16) as the canonical companion.
 
-The compose `docker-compose.gemma-dflash.yml` mounts these files RO over the stock nightly image's vLLM package paths, same pattern as `vllm-gemma4-mtp/` and `models/qwen3.6-27b/vllm/patches/vllm-marlin-pad/`.
+The compose `docker-compose.dual-dflash.yml` mounts these files RO over the stock nightly image's vLLM package paths, same pattern as `vllm-gemma4-mtp/` and `models/qwen3.6-27b/vllm/patches/vllm-marlin-pad/`.
 
 ## Why this exists
 
@@ -41,7 +41,7 @@ DFlash dominates MTP on **code (+18%)**; MTP wins on **narrative (+15%)**. They 
 
 When PR #41703 merges to vLLM main AND a vLLM `:nightly` tag rebuilds against that change. At that point:
 
-1. Bump the `image:` line in `docker-compose.gemma-dflash.yml` to the new nightly with a SHA dated AFTER the merge
+1. Bump the `image:` line in `docker-compose.dual-dflash.yml` to the new nightly with a SHA dated AFTER the merge
 2. Remove the entire `# vLLM PR #41703 overlay` volume block from the compose
 3. Delete this entire patch directory (`rm -rf models/gemma-4-31b/vllm/patches/vllm-gemma4-dflash/`)
 4. Update the [docs/UPSTREAM.md](../../../../docs/UPSTREAM.md) row from "🟡 Open" to "🟢 Landed"
