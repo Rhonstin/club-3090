@@ -30,7 +30,7 @@ Showcase: full **262K context** on one 3090 with vision + q4_0 KV.
 
 ```bash
 cd models/qwen3.6-27b/llama-cpp/compose
-MODEL_DIR=/mnt/models/huggingface docker compose up -d
+MODEL_DIR=/your/models/dir docker compose up -d
 ```
 
 Memory budget: 14.5 GB (Q3_K_XL) + 4.5 GB KV @ 262K + 0.8 GB mmproj ≈ 20 GB / 24 GB.
@@ -66,7 +66,7 @@ The Q3_K_XL number at 262K is **lower than community-reported 35-45 tok/s** ([Re
 
 ```bash
 # 1. Get a GGUF quant (recommended: Unsloth's Q4_K_M)
-hf download unsloth/Qwen3.6-27B-GGUF Qwen3.6-27B-Q4_K_M.gguf --local-dir /mnt/models/huggingface/qwen3.6-27b-gguf/
+hf download unsloth/Qwen3.6-27B-GGUF Qwen3.6-27B-Q4_K_M.gguf --local-dir $MODEL_DIR/qwen3.6-27b-gguf/
 
 # 2. Build llama.cpp with CUDA support
 git clone https://github.com/ggerganov/llama.cpp /opt/llama.cpp
@@ -99,9 +99,9 @@ GGUFs of this model are at [unsloth/Qwen3.6-27B-GGUF](https://huggingface.co/uns
 ## Vision (mmproj)
 
 ```bash
-hf download unsloth/Qwen3.6-27B-GGUF mmproj-F16.gguf --local-dir /mnt/models/huggingface/qwen3.6-27b-gguf/
+hf download unsloth/Qwen3.6-27B-GGUF mmproj-F16.gguf --local-dir $MODEL_DIR/qwen3.6-27b-gguf/
 
-# Add to launch: --mmproj /mnt/models/huggingface/qwen3.6-27b-gguf/mmproj-F16.gguf
+# Add to launch: --mmproj $MODEL_DIR/qwen3.6-27b-gguf/mmproj-F16.gguf
 ```
 
 Vision works via the mmproj model. Sample text+image queries are OpenAI-compat.

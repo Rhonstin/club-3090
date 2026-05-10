@@ -86,7 +86,7 @@ This is exactly why our launch frame is **two routes, not one** ([README](../../
 
 ```bash
 # Use hf CLI (pip install 'huggingface-hub[hf_transfer]')
-hf download unsloth/Qwen3.6-27B-GGUF Qwen3.6-27B-Q4_K_M.gguf --local-dir /mnt/models/huggingface/qwen3.6-27b-gguf/
+hf download unsloth/Qwen3.6-27B-GGUF Qwen3.6-27B-Q4_K_M.gguf --local-dir $MODEL_DIR/qwen3.6-27b-gguf/
 ```
 
 Confirm size matches the HuggingFace listing. If a `sha256` is published, verify it.
@@ -108,7 +108,7 @@ For a sane mid-context default (65K, plenty for chat + light agent work):
 
 ```bash
 /opt/llama.cpp/build/bin/llama-server \
-  -m /mnt/models/huggingface/qwen3.6-27b-gguf/Qwen3.6-27B-Q4_K_M.gguf \
+  -m $MODEL_DIR/qwen3.6-27b-gguf/Qwen3.6-27B-Q4_K_M.gguf \
   -c 65536 \
   --host 0.0.0.0 --port 8020 \
   -ngl 999 \
@@ -131,7 +131,7 @@ Recipe (community-reported, validated by multiple users on r/LocalLLaMA):
 
 ```bash
 /opt/llama.cpp/build/bin/llama-server \
-  -m /mnt/models/huggingface/qwen3.6-27b-gguf/Qwen3.6-27B-Q4_K_M.gguf \
+  -m $MODEL_DIR/qwen3.6-27b-gguf/Qwen3.6-27B-Q4_K_M.gguf \
   -ngl 99 \
   -c 262144 \
   -np 1 \
@@ -154,12 +154,12 @@ Sustained throughput at 262K with this config is typically **35-45 tok/s** on a 
 
 Download the `mmproj` model:
 ```bash
-hf download unsloth/Qwen3.6-27B-GGUF mmproj-F16.gguf --local-dir /mnt/models/huggingface/qwen3.6-27b-gguf/
+hf download unsloth/Qwen3.6-27B-GGUF mmproj-F16.gguf --local-dir $MODEL_DIR/qwen3.6-27b-gguf/
 ```
 
 Add to launch:
 ```bash
---mmproj /mnt/models/huggingface/qwen3.6-27b-gguf/mmproj-F16.gguf
+--mmproj $MODEL_DIR/qwen3.6-27b-gguf/mmproj-F16.gguf
 ```
 
 ### 5. Tool calls (limited)
@@ -185,12 +185,12 @@ cmake -B build -DGGML_CUDA=ON
 cmake --build build --config Release -j
 
 # Download draft model (~500 MB)
-hf download z-lab/Qwen3.6-27B-DFlash --local-dir /mnt/models/huggingface/z-lab/Qwen3.6-27B-DFlash/
+hf download z-lab/Qwen3.6-27B-DFlash --local-dir $MODEL_DIR/z-lab/Qwen3.6-27B-DFlash/
 
 # Launch
 /opt/lucebox-hub/build/bin/llama-server \
-  -m /mnt/models/huggingface/qwen3.6-27b-gguf/Qwen3.6-27B-Q4_K_M.gguf \
-  --draft /mnt/models/gguf/qwen3.6-27b-dflash/dflash-N5.gguf \
+  -m $MODEL_DIR/qwen3.6-27b-gguf/Qwen3.6-27B-Q4_K_M.gguf \
+  --draft $MODEL_DIR/qwen3.6-27b-dflash-gguf/dflash-N5.gguf \
   --draft-max 5 \
   --draft-min 1 \
   -c 65536 \
@@ -210,8 +210,8 @@ If you have two GPUs (e.g. 2× 3090), lucebox-hub now supports a heterogeneous-s
 ```bash
 # Target on GPU 0, DFlash draft on GPU 1
 /opt/lucebox-hub/build/bin/llama-server \
-  -m /mnt/models/gguf/qwen3.5-27b/Qwen3.5-27B-Q4_K_M.gguf \
-  --draft /mnt/models/gguf/qwen3.5-27b-dflash/dflash-N5.gguf \
+  -m $MODEL_DIR/qwen3.5-27b-gguf/Qwen3.5-27B-Q4_K_M.gguf \
+  --draft $MODEL_DIR/qwen3.5-27b-dflash-gguf/dflash-N5.gguf \
   --target-gpu 0 --draft-gpu 1 \
   --draft-max 16 --draft-min 1 \
   -c 262144 \

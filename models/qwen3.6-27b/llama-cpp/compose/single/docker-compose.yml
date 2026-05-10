@@ -43,15 +43,15 @@
 #   1. Get the GGUF + mmproj:
 #        hf download unsloth/Qwen3.6-27B-GGUF \
 #          --include "Qwen3.6-27B-UD-Q3_K_XL.gguf" "mmproj-F16.gguf" \
-#          --local-dir /mnt/models/huggingface/qwen3.6-27b-gguf/unsloth-q3kxl
+#          --local-dir $MODEL_DIR/qwen3.6-27b-gguf/unsloth-q3kxl
 #      (mmproj sometimes ships at the repo root rather than under unsloth-q3kxl;
 #       the MMPROJ env var below points at the canonical sidecar location.)
 #   2. From this directory:
-#        MODEL_DIR=/mnt/models/huggingface docker compose up -d
+#        MODEL_DIR=/your/models/dir docker compose up -d
 #   3. curl http://localhost:8020/v1/models  → should list the model.
 #
 # Override defaults via .env or shell:
-#   MODEL_DIR              host dir to mount as /models  (default: ../../../../models-cache for repo, /mnt/models/huggingface on this stack)
+#   MODEL_DIR              host dir to mount as /models  (default: ../../../../models-cache for repo, /path/to/your/models on your stack)
 #   GGUF_FILE              path under /models  (default: qwen3.6-27b-gguf/unsloth-q3kxl/Qwen3.6-27B-UD-Q3_K_XL.gguf)
 #   MMPROJ_FILE            path under /models  (default: qwen3.6-27b-gguf/mmproj-F16.gguf)
 #   CTX_SIZE               total KV pool       (default: 262144)
