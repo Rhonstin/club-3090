@@ -15,6 +15,34 @@ Past CalVer tags (preserved for history):
 
 CHANGELOG entries below 2026-05-10 use date-prose headings (pre-SemVer convention). New entries from `v0.3.0` use `## v0.X.Y (YYYY-MM-DD) — title`.
 
+## v0.3.1 (2026-05-10) — soak-helper captures `delta.reasoning` (closes cross-rig silent-empty turn-5 mystery)
+
+One-line patch behind a meaningful finding: vLLM nightly (`0.20.2rc1.dev9+`) emits the qwen3 reasoning parser's output under `delta.reasoning` (legacy field name), not `delta.reasoning_content` that `soak-helper.py` was watching. Result: any thinking-on response whose `<think>` block didn't close within `max_tokens` showed up as a silent-empty turn (`ttft_ms == t_ms`, `decode_tps = 0.0`, empty `content` + empty `reasoning_content`) — the model was generating correctly, the harness just couldn't see the wire.
+
+This closes the cross-rig "silent-empty turn 5" pattern that was parked behind the Cliff 2b investigation. It was a harness measurement bug, not a model/rig issue.
+
+Validation on JDWarner's exact repro request (#107 turn 5, math problem + `enable_thinking=true` + `max_tokens=2000`):
+
+| | Before | After |
+|---|---|---|
+| `ttft_ms` | 22709 (== `t_ms`) | **234** |
+| `decode_tps` | **0.0** | **88.985** |
+| `reasoning_content` chars | 0 | 3959 |
+| `completion_tokens` | 2000 | 2000 (unchanged) |
+
+Validation soak (`qwen3.6-27b dual.yml`, fresh-mode, 20 sessions × 5 turns):
+
+```
+verdict              PASS
+silent_empty         0 / 100 (0.0%)   ← was ~3-5/40 baseline
+p50_decode_tps       90.22
+p95_ttft_ms          1389
+errors               0
+max_growth_mib       0 / 200
+```
+
+**Patch** ([88eb67a](https://github.com/noonghunna/club-3090/commit/88eb67a)): `soak-helper.py` accumulates `delta.reasoning_content || delta.reasoning` (covers both vLLM streaming-output shapes, current and legacy). Three-line change inside `cmd_run`'s SSE chunk loop.
+
 ## v0.3.0 (2026-05-10) — Qwen thinking-off default, MODEL_DIR UX overhaul, docs cleanup, aider-polyglot bench rows
 
 Eight commits since `v2026.05.10`. Headline: Qwen 3.6 27B now defaults `enable_thinking=false` server-side via `--default-chat-template-kwargs` across all 21 vLLM Qwen composes (closes the recurring "Qwen looks much slower than Gemma" agentic-bench skew). MODEL_DIR docs no longer bake the dev-rig path. New `--include-commit` flag on `power-cap-sweep.sh`.
