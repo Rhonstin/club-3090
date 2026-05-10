@@ -101,6 +101,12 @@ commit_parsers = [
     { message = "^Merge branch", skip = true },
     { message = "^Merge remote-tracking", skip = true },
 
+    # --- Skip release-machinery noise ---
+    # The release.yml workflow auto-commits a CHANGELOG.md regen with this
+    # subject after every tag push. Hide it from release notes — it's pure
+    # machine traffic, not a user-visible change.
+    { message = "^chore\\(changelog\\): regenerate for v", skip = true },
+
     # --- Prefix-based (deterministic, anchored to subject line) ---
     # New models / new compose paths
     { message = "^models[(:]", group = "🎯 New models + serving paths" },
