@@ -115,6 +115,10 @@ Every compose starts with a `Profile (at-a-glance)` block declaring the (Model, 
 #   Genesis:   <none | v7.72.2 | N/A — Genesis is Qwen3-Next-specific>
 #   Status:    <REQUIRED — exactly one of the enum values below>
 #   Caveats:   <REQUIRED if Status is ⚠️ / 👁️ / ⏸️ / 🗑️; otherwise omit>
+#   Quality:   <OPTIONAL — populated by `bash scripts/quality-test.sh --medium`>
+#                e.g. "ToolCall-15 14/15 (93%) · InstructFollow-15 13/15 (87%)
+#                      · StructOutput-15 15/15 (100%) · DataExtract-15 12/15 (80%)
+#                      (--medium, packs v1.0.x, 2026-05-09)"
 #   Best for:  <one short phrase — what workload this serves; ⭐ for canonical>
 # ---------------------------------------------------------------------------
 # (existing free-form description continues below)
@@ -124,8 +128,8 @@ Every compose starts with a `Profile (at-a-glance)` block declaring the (Model, 
 
 | Value | Meaning | Validation gate |
 |---|---|---|
-| `✅ Production` | Recommended for users. | verify-full 8/8 + verify-stress 7/7 + bench (BENCHMARKS row) + soak-continuous PASS. |
-| `⚠️ Production w/ caveats` | Works under documented constraints; not the same as broken. | Same gates as Production, but a known-and-disclosed limitation exists (e.g., Cliff 2b at >50K). Caveats line MUST list the constraint. |
+| `✅ Production` | Recommended for users. | verify-full 8/8 + verify-stress 7/7 + bench (BENCHMARKS row) + soak-continuous PASS + `quality-test.sh --quick` PASS (no ≥10pp regression on ToolCall / InstructFollow vs the pre-change baseline). Quality numbers on the compose's `Quality:` schema field when `--medium` has been run. |
+| `⚠️ Production w/ caveats` | Works under documented constraints; not the same as broken. | Same gates as Production, but a known-and-disclosed limitation exists (e.g., Cliff 2b at >50K, or a >10pp drop on a specific quality pack). Caveats line MUST list the constraint. |
 | `🧪 Experimental` | Under active validation; may not boot or pass all tests. | Typically untracked in git. No production guarantee. |
 | `👁️ Preview` | Known quality issues; tracked but not for production. | E.g., quality regressions in soak / NIAH. Caveats line MUST list specific issues. |
 | `⏸️ Upstream-gated` | Exists but blocked by external action (PR merge, driver fix, hardware ceiling). | Boots only with vendored override OR doesn't boot until external dep lands. Caveats line MUST point at the external dep. |
@@ -147,7 +151,7 @@ Workflow:
 
 1. **Author the compose** in `models/<model>/<engine>/compose/<topology>/<feature>.yml` (or `docker-compose.yml` for the topology default) with the standard profile schema header. Mark `Status: ⚠️ EXPERIMENTAL` (or `⚠️ PREVIEW` if quality issues are known) so readers know it's not validated.
 2. **Don't `git add`** until validation passes. The file shows up in `git status` as `??` — that's the signal. `git ls-tree -r HEAD` lists only shipped composes; the gap between that and `ls compose/*.yml` tells you what's pending validation.
-3. **Validation gates** before promoting: `verify-full.sh` 8/8, `verify-stress.sh` 7/7 (or documented failures with rationale), `bench.sh` (numbers added to BENCHMARKS.md), `soak-test.sh SOAK_MODE=continuous` (catches Cliff 2b).
+3. **Validation gates** before promoting: `verify-full.sh` 8/8, `verify-stress.sh` 7/7 (or documented failures with rationale), `bench.sh` (numbers added to BENCHMARKS.md), `soak-test.sh SOAK_MODE=continuous` (catches Cliff 2b), `quality-test.sh --quick` (no major regression on ToolCall / InstructFollow). For pin bumps and new quants, run `quality-test.sh --medium` and add the result line to the compose's `Quality:` schema field.
 4. **Promote**: drop the `Status: ⚠️ EXPERIMENTAL` line from the profile schema, `git add`, commit. Cross-rig validation can come later via the `numbers-from-your-rig` issue template.
 
 For **entirely new models** under validation (e.g. "let's try MiniMax-M2.7"): keep the whole `models/<new-model>/` directory untracked until at least one compose validates. Avoid pushing `models/<new-model>/README.md` etc. before there's a working compose to back it up — empty model directories on master signal capability we don't actually have.
@@ -163,9 +167,14 @@ References (orphan composes / patches sitting in this state as of 2026-05-09):
 - For any change that adds a footnote to "this depends on upstream X" — the answer is to link the row in `docs/UPSTREAM.md`, not to inline-cite the upstream URL.
 
 ### Tests
-- `verify-full.sh` — fast functional smoke (~1–2 min). Runs on every compose change.
-- `verify-stress.sh` — boundary cases (longctx ladder + tool-prefill OOM ~5–10 min). Runs on cliff-related changes.
-- `bench.sh` — canonical TPS bench. Run when you change anything that could move TPS (compose flags, Genesis env vars, vLLM pin).
+- `verify.sh` — fast smoke (~15s). Confirms the stack is responding; runs after `setup.sh`.
+- `verify-full.sh` — functional (~1-2 min). Runs on every compose change.
+- `verify-stress.sh` — boundary cases (longctx ladder + tool-prefill OOM ~5-10 min). Runs on cliff-related changes.
+- `bench.sh` — canonical TPS bench (~3-5 min). Run when you change anything that could move TPS (compose flags, Genesis env vars, vLLM pin).
+- `quality-test.sh` — behavioral quality (~10-30 min depending on `--quick` / `--medium` / `--full`). Wraps [`benchlocal-cli`](https://github.com/noonghunna/benchlocal-cli) — runs verifier-backed bench packs (ToolCall-15, InstructFollow-15, StructOutput-15, etc) against the running endpoint. Catches what operational tests miss: a compose can pass verify + stress + bench + soak and still ship with degraded tool-call accuracy or instruction-follow drift from quantization or Genesis env-flips. Run before promoting `Status: ✅ Production` and before any pin bump that could shift behavior. See [`docs/QUALITY_TEST.md`](docs/QUALITY_TEST.md).
+- `soak-test.sh` — stability (30-60 min). Run before shipping config / Genesis / memory-policy changes — catches Cliff 2b.
+
+The pipeline is layered: each script has a different question it answers ("does it serve / work / survive / fast / behave correctly / stay healthy"). Skipping any layer can mask regressions.
 
 ### Commits
 - New commit per logical change. Don't amend published commits.

@@ -1,0 +1,109 @@
+# ===========================================================================
+# Profile (at-a-glance):
+#   Model:     Qwopus3.6-27B (delta-merge of Qwen3.6-27B + Opus-style RL,
+#              INT4 + BF16 MTP overlay via Recipe D)
+#   Topology:  Dual 3090 PCIe (TP=2)
+#   Drafter:   MTP n=3 (BF16 MTP overlay)
+#   KV:        fp8_e5m2
+#   Vision:    yes
+#   Max ctx:   262K
+#   Genesis:   v7.72.2
+#   Status:    👁️ Preview
+#   Caveats:   41× line repetition + NIAH drop + 10% silent-empty turn-5 in soak. Three cheap A/Bs queued (enable_thinking=false → Genesis-loaded → ngram swap). NOT shipped to repo (untracked).
+#   Best for:  Experimental — Opus-style reasoning trial. Use at your own risk.
+# ---------------------------------------------------------------------------
+# Qwopus3.6-27B + BF16 MTP overlay — dual RTX 3090 variant.
+#
+# Qwopus is a Claude-Opus-distillation fine-tune of Qwen3.6-27B by Jackrong.
+# This variant uses the same Recipe-D delta-merge pattern as carnice-bf16mtp:
+# Lorbus's AutoRound INT4 grid applied to Qwopus's BF16 weights, then 7
+# mtp.layers.0.* projections replaced with BF16 to keep MTP AL high.
+#
+# Source: https://huggingface.co/Jackrong/Qwopus3.6-27B-v1-preview
+#
+# Tool-call format: clean JSON inside <tool_call> tags (verified pre-quant via
+# chat_template.jinja), so `--tool-call-parser hermes` is the right match.
+# Reasoning: standard Qwen3 <think>/</think> blocks → `--reasoning-parser qwen3`.
+#
+# Status: first-build artifact. No measured TPS / AL data yet — populate
+# BENCHMARKS.md after Step 8 validation chain (verify-full + verify-stress +
+# soak-continuous).
+#
+# Run:
+#   cd <repo>/models/qwen3.6-27b/vllm/compose
+#   docker compose -f dual/qwopus-bf16mtp.yml up -d
+# ===========================================================================
+services:
+  vllm-qwopus-bf16mtp:
+    image: vllm/vllm-openai:nightly-01d4d1ad375dc5854779c593eee093bcebb0cada
+    container_name: vllm-qwopus-bf16mtp
+    restart: "no"
+    ports:
+      - "${PORT:-8071}:8000"
+    volumes:
+      - ${MODEL_DIR:-../../../../../models-cache}:/root/.cache/huggingface
+      - ../../cache/torch_compile:/root/.cache/vllm/torch_compile_cache
+      - ../../cache/triton:/root/.triton/cache
+      # Marlin pad-sub-tile-n patch (vllm#40361) — required for TP=2 on
+      # AutoRound W4A16 where some out-dim shards fall below 64.
+      - ../../patches/vllm-marlin-pad/marlin.py:/usr/local/lib/python3.12/dist-packages/vllm/model_executor/kernels/linear/mixed_precision/marlin.py:ro
+      - ../../patches/vllm-marlin-pad/MPLinearKernel.py:/usr/local/lib/python3.12/dist-packages/vllm/model_executor/kernels/linear/mixed_precision/MPLinearKernel.py:ro
+    environment:
+      - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN:-}
+      - VLLM_WORKER_MULTIPROC_METHOD=spawn
+      - NCCL_CUMEM_ENABLE=0
+      - NCCL_P2P_DISABLE=1
+      - VLLM_NO_USAGE_STATS=1
+      - VLLM_USE_FLASHINFER_SAMPLER=1
+      - OMP_NUM_THREADS=1
+      - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:512
+    shm_size: "16gb"
+    ipc: host
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    command:
+      - --model
+      - /root/.cache/huggingface/qwopus3.6-27b-int4-recipe-d-bf16mtp
+      - --served-model-name
+      - qwopus-bf16mtp
+      - --quantization
+      - auto_round
+      - --dtype
+      - float16
+      - --tensor-parallel-size
+      - "2"
+      - --disable-custom-all-reduce
+      - --max-model-len
+      - "${MAX_MODEL_LEN:-262144}"
+      - --gpu-memory-utilization
+      - "${GPU_MEMORY_UTILIZATION:-0.92}"
+      - --max-num-seqs
+      - "2"
+      - --max-num-batched-tokens
+      - "8192"
+      - --kv-cache-dtype
+      - fp8_e5m2
+      - --trust-remote-code
+      # NOTE: --reasoning-parser qwen3 fails on Qwopus boot ("could not locate
+      # think start/end tokens"). Qwopus ships chat_template embedded inside
+      # tokenizer_config.json (vs Carnice's separate .jinja file) and
+      # padding_side=right (vs Carnice's left), which trips vLLM's tokenizer
+      # wrapper. Without the parser, <think>...</think> stays inline in
+      # `content` instead of being split into `reasoning_content` — fine for
+      # our validation. Investigate root cause separately.
+      - --enable-auto-tool-choice
+      - --tool-call-parser
+      - hermes
+      - --enable-prefix-caching
+      - --enable-chunked-prefill
+      - --speculative-config
+      - '{"method":"mtp","num_speculative_tokens":3}'
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
