@@ -90,6 +90,73 @@ case "${MODEL_NAME}" in
 esac
 
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# ---------- MODEL_DIR resolution ----------
+# Order of precedence:
+#   1. MODEL_DIR already exported in the calling shell  → use as-is
+#   2. .env at repo root sets MODEL_DIR                  → source it
+#   3. Interactive prompt (only if stdin is a TTY)       → ask user
+#   4. Silent fallback to <repo>/models-cache            → in-repo default
+#
+# The prompt only fires for fresh users on a TTY who haven't set anything.
+# CI / scripted runs (no TTY) get the silent fallback, preserving prior behavior.
+
+# Step 2: source repo-root .env if present (lets a saved choice persist)
+if [[ -z "${MODEL_DIR:-}" && -f "${ROOT_DIR}/.env" ]]; then
+  # shellcheck source=/dev/null
+  set -a; source "${ROOT_DIR}/.env"; set +a
+fi
+
+# Step 3: prompt if still unset + interactive
+if [[ -z "${MODEL_DIR:-}" && -t 0 && -t 1 ]]; then
+  echo ""
+  echo "Where should I put model weights?"
+  echo "  Models are large (Qwen3.6-27B AutoRound: ~14 GB; Gemma 4 31B: ~21 GB)."
+  echo "  This dir lives outside the git tree — pick a location with sufficient free space."
+  echo ""
+  echo "  1) ${ROOT_DIR}/models-cache  (in-repo, default — pollutes git tree)"
+  echo "  2) ${HOME}/models             (recommended for cross-rig — outside repo)"
+  echo "  3) custom path"
+  echo ""
+  while true; do
+    read -rp "Choice [1-3] (or set MODEL_DIR env var to skip): " pick
+    case "${pick}" in
+      1) MODEL_DIR="${ROOT_DIR}/models-cache"; break ;;
+      2) MODEL_DIR="${HOME}/models"; break ;;
+      3)
+        read -rp "  Enter absolute path: " custom
+        if [[ "${custom}" =~ ^/ ]]; then
+          MODEL_DIR="${custom}"; break
+        else
+          echo "  ! must be an absolute path (start with /)" >&2
+        fi
+        ;;
+      *) echo "  ! invalid — pick 1, 2, or 3" >&2 ;;
+    esac
+  done
+  echo ""
+
+  # Offer to persist the choice so future runs skip the prompt
+  read -rp "Save MODEL_DIR=${MODEL_DIR} to .env so we skip this next time? [Y/n]: " save
+  if [[ "${save:-y}" =~ ^[Yy]$ || -z "${save:-}" ]]; then
+    if [[ -f "${ROOT_DIR}/.env" ]]; then
+      # Update existing .env (replace MODEL_DIR= line if present, else append)
+      if grep -qE "^MODEL_DIR=" "${ROOT_DIR}/.env"; then
+        sed -i "s|^MODEL_DIR=.*|MODEL_DIR=${MODEL_DIR}|" "${ROOT_DIR}/.env"
+      else
+        echo "MODEL_DIR=${MODEL_DIR}" >> "${ROOT_DIR}/.env"
+      fi
+    else
+      echo "MODEL_DIR=${MODEL_DIR}" > "${ROOT_DIR}/.env"
+    fi
+    echo "  → saved. (.env is gitignored.)"
+  else
+    echo "  → not saved. Set MODEL_DIR=... when re-running, or you'll get this prompt again."
+  fi
+  echo ""
+fi
+
+# Step 4: silent fallback (preserves prior behavior for non-TTY contexts)
 MODEL_DIR="${MODEL_DIR:-${ROOT_DIR}/models-cache}"
 GENESIS_DIR="${ROOT_DIR}/models/${MODEL_NAME}/vllm/patches/genesis"
 
