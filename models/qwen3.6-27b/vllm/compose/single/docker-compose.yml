@@ -118,6 +118,9 @@ services:
       # this fix guards .tolist() syscalls during capture.
       # workspace_lock_disable — relaxes vllm#39226 strict assertion until
       # Sandermage's P98 marker fix lands. v0.20-only requirement.
+      # vLLM PR #35936 required-tool fallback (drop when upstream lands).
+      - ../../patches/vllm-pr35936-required-fallback/vllm/entrypoints/openai/chat_completion/serving.py:/usr/local/lib/python3.12/dist-packages/vllm/entrypoints/openai/chat_completion/serving.py:ro
+      - ../../patches/vllm-pr35936-required-fallback/vllm/entrypoints/openai/engine/serving.py:/usr/local/lib/python3.12/dist-packages/vllm/entrypoints/openai/engine/serving.py:ro
     environment:
       # Uncomment the next line to pin to a specific GPU (e.g. GPU 0):
       # - CUDA_VISIBLE_DEVICES=0
