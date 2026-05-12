@@ -93,6 +93,19 @@ The working paths today are `dual/tq3-nomtp.yml` without Genesis, or Genesis-bac
 
 A Genesis patch (`GENESIS_ENABLE_PN8_MTP_DRAFT_ONLINE_QUANT=1`) added in v7.62.x — backport of vllm#40849 that makes the MTP draft head inherit the target model's online-quant config. We measured ~800-900 MiB freed on the FP8+MTP single-card path (`tools-text.yml`), which **closes Cliff 1 there**. No-op on TQ3 paths. Enabled by default in `tools-text.yml` since 2026-04-29; opt-in elsewhere via the env var if you want to test.
 
+### INT8 PTH gives me 150 TPS single-stream but doesn't scale with concurrency — is that a bug?
+
+Not a bug — it's the canonical signature of `int8_per_token_head` quantization. INT8 PTH stores a separate scale per (token, head) pair, so at single-stream the dequant is cheap; at concurrency the per-token-head scale-lookup + dequant becomes a serialization point. fp8 has a single global scale, so dequant is essentially free regardless of how many concurrent streams are decoding. This is why INT8 PTH lands high on single-stream throughput but stays flat as you add concurrent requests, while fp8 starts lower per-stream but scales near-linearly.
+
+This shows up clearly in the head-to-head matrix on dual-3090:
+
+- **INT8 PTH** (`dual/int8.yml`) — 85 narr / 121 code TPS single-stream, 605K KV pool / 2.31× concurrency at 262K, p50 decode TPS stays near baseline at concurrency (no aggregate lift)
+- **fp8 default** (`dual/docker-compose.yml`) — lower per-stream but scales to ~9× concurrency at 262K, aggregate throughput goes up almost linearly with stream count
+
+So pick by workload: INT8 PTH if you want max single-stream TPS and don't need many concurrent users; fp8 if you want aggregate throughput across many streams. If you want **both** — high single-stream *and* high concurrency on the same compose — the answer is the Genesis-backed TQ3+MTP path (`dual/tq3-mtp-genesis.yml`): 89 / 119 narr / code TPS single-stream + 1.22M KV pool / 4.66× concurrency on the same PCIe dual-3090 rig (~5pp quality cost vs INT8 PTH on the 150-scenario quality suite, within noise on aider-polyglot-30 — see [docs/TQ3_MTP_GENESIS.md](TQ3_MTP_GENESIS.md) for the full writeup). This is also why `dual/turbo.yml` (4-stream production variant) ships TQ3+MTP rather than INT8 PTH — INT8 PTH wouldn't scale across the 4 concurrent streams.
+
+If your numbers on the same compose look different from ours by >15%, the most likely sources of the gap are: power cap (370W vs 290W = ~10-15%), vLLM nightly (pre-#41434 was ~15% slower on Qwen3-Next due to GPU↔CPU syncs in attention), Genesis patches loaded vs not (~10-15% via P67 + PN12 + PN25 on Qwen3-Next), MTP `n` value, or the prompt shape. Run `bash scripts/rebench-full.sh` to capture the canonical 5-phase numbers and we can compare apples-to-apples — see the [Numbers from your rig](https://github.com/noonghunna/club-3090/issues/new?template=numbers-from-your-rig.yml) issue template to share them back.
+
 ---
 
 ## Community
