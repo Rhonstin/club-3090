@@ -90,8 +90,14 @@ services:
       - ../../patches/vllm-marlin-pad/marlin.py:/usr/local/lib/python3.12/dist-packages/vllm/model_executor/kernels/linear/mixed_precision/marlin.py:ro
       - ../../patches/vllm-marlin-pad/MPLinearKernel.py:/usr/local/lib/python3.12/dist-packages/vllm/model_executor/kernels/linear/mixed_precision/MPLinearKernel.py:ro
       # vLLM PR #35936 required-tool fallback (drop when upstream lands).
-      - ../../patches/vllm-pr35936-required-fallback/vllm/entrypoints/openai/chat_completion/serving.py:/usr/local/lib/python3.12/dist-packages/vllm/entrypoints/openai/chat_completion/serving.py:ro
-      - ../../patches/vllm-pr35936-required-fallback/vllm/entrypoints/openai/engine/serving.py:/usr/local/lib/python3.12/dist-packages/vllm/entrypoints/openai/engine/serving.py:ro
+      # vLLM PR #35936 required-tool fallback — sidecar pattern (drop when upstream lands).
+      # Bind-mounted at side paths so install.sh can copy into vLLM's site-packages
+      # BEFORE Genesis runs — avoids the RO-mount conflict with Genesis P64/P68/P69
+      # which write to chat_completion/serving.py at vllm-import time. See
+      # patches/vllm-pr35936-required-fallback/install.sh + README.md.
+      - ../../patches/vllm-pr35936-required-fallback/vllm/entrypoints/openai/chat_completion/serving.py:/etc/club3090/pr35936-chat-completion-serving.py:ro
+      - ../../patches/vllm-pr35936-required-fallback/vllm/entrypoints/openai/engine/serving.py:/etc/club3090/pr35936-engine-serving.py:ro
+      - ../../patches/vllm-pr35936-required-fallback/install.sh:/etc/club3090/install-pr35936.sh:ro
       # froggeric/Qwen-Fixed-Chat-Templates qwen3.6 — fixes 7 default-template
       # bugs (empty <think></think> spam, </thinking> hallucination, unclosed
       # think before tool call, no-user-query crash, developer role, etc.).
@@ -127,6 +133,8 @@ services:
       - |
         # VLLM_ENFORCE_EAGER=1 in .env disables CUDA graphs — use on
         # hardware where graph capture causes OOM or instability (e.g. WSL2).
+        # Install PR #35936 overlay before vllm imports (drop when upstream lands).
+        bash /etc/club3090/install-pr35936.sh
         exec vllm serve ${VLLM_ENFORCE_EAGER:+--enforce-eager} "$@"
       - --
     command:

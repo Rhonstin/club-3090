@@ -49,10 +49,48 @@ This overlay therefore lands the PR's intent in **both** places in
    as before so XML-emitting paths keep working.
 
 The chat completion file is vendored unchanged from the pinned nightly as
-a matching drop-in mount target. The PR's streaming-side hunks target a
-pre-parser-manager code path that has been refactored on `nightly-1acd67a79`;
-non-streaming clients (MLS-Bench, our curl repro, most agent harnesses)
-exercise only the engine-side fix.
+a future-ready slot. The PR's streaming-side hunks target a pre-parser-manager
+code path that has been refactored on `nightly-1acd67a79`; non-streaming
+clients (MLS-Bench, our curl repro, most agent harnesses) exercise only the
+engine-side fix.
+
+## Installation: sidecar pattern (v0.5.1+)
+
+The overlay is **not** mounted directly at vLLM's site-packages paths. Instead:
+
+1. Both files are bind-mounted at side paths under `/etc/club3090/`:
+   - `pr35936-chat-completion-serving.py`
+   - `pr35936-engine-serving.py`
+2. `install.sh` is bind-mounted at `/etc/club3090/install-pr35936.sh`
+3. The compose entrypoint invokes `bash /etc/club3090/install-pr35936.sh`
+   **before** any other patch step (`python3 -m vllm._genesis.patches.apply_all`
+   in Genesis-loaded composes, or `exec vllm serve` in Genesis-less ones).
+4. `install.sh` copies our files into vLLM's site-packages with `cp`. The
+   destination becomes a writable file in the container's RW layer.
+
+### Why a sidecar instead of an RO bind-mount
+
+v0.5.0 originally mounted both files directly at vLLM's site-packages paths
+with `:ro`. That broke 8 Genesis-loaded composes because Genesis P64
+(qwen3coder MTP streaming early-return), P68 (auto force tool_choice=required),
+and P69 (long-context tool-format reminder) all write hooks into
+`chat_completion/serving.py` at vllm-import time. The RO mount blocked those
+writes with `Errno 30: Read-only file system`, and Genesis explicitly warned
+"partial state risk; container should be torn down." Reported by @ygafarov in
+[#120](https://github.com/noonghunna/club-3090/issues/120#issuecomment-4443236686);
+sidecar pattern shipped in v0.5.1.
+
+The sidecar resolves it cleanly:
+- Our patched files land in the container's RW layer (not bind-mounted RO)
+- Genesis can write its hooks on top freely
+- Host patches dir stays canonical (no Genesis hooks bleeding into our git tree)
+- Each container restart starts fresh; Genesis re-applies on a clean copy
+
+If a future patch to our overlay also touches `chat_completion/serving.py`
+(e.g. when PR #35936's streaming hunks land for a nightly we pin to), the
+sidecar layout supports it without further changes — our patched content
+sits on disk in the install.sh source path, gets installed before Genesis
+runs, Genesis layers its hooks on top.
 
 ## Validation
 
@@ -67,6 +105,12 @@ End-to-end checked 2026-05-12:
   `thinking.enabled: true` workaround removed from `configs/club-3090.yaml`:
   agent completes loop with non-zero steps (was "No action returned after
   3 attempts" pre-overlay).
+
+Sidecar pattern validated 2026-05-13 on `single/long-text.yml` (Genesis-loaded):
+- `install.sh` runs before Genesis: "chat_completion/serving.py installed from /etc/club3090/..."
+- Genesis P64 succeeds: "P64 applied: 2 files modified, 0 idempotent" (was failing with `Read-only file system` pre-v0.5.1)
+- Genesis P68/P69 succeed: "Hook injected into create_chat_completion" (was failing pre-v0.5.1)
+- Zero `Read-only file system` errors anywhere in the boot log.
 
 ## Drop Trigger
 

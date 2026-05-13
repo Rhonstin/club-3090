@@ -148,8 +148,14 @@ services:
       # workspace_lock_disable — relaxes vllm#39226 strict assertion until
       # Sandermage's P98 marker fix lands. v0.20-only requirement.
       # vLLM PR #35936 required-tool fallback (drop when upstream lands).
-      - ../../patches/vllm-pr35936-required-fallback/vllm/entrypoints/openai/chat_completion/serving.py:/usr/local/lib/python3.12/dist-packages/vllm/entrypoints/openai/chat_completion/serving.py:ro
-      - ../../patches/vllm-pr35936-required-fallback/vllm/entrypoints/openai/engine/serving.py:/usr/local/lib/python3.12/dist-packages/vllm/entrypoints/openai/engine/serving.py:ro
+      # vLLM PR #35936 required-tool fallback — sidecar pattern (drop when upstream lands).
+      # Bind-mounted at side paths so install.sh can copy into vLLM's site-packages
+      # BEFORE Genesis runs — avoids the RO-mount conflict with Genesis P64/P68/P69
+      # which write to chat_completion/serving.py at vllm-import time. See
+      # patches/vllm-pr35936-required-fallback/install.sh + README.md.
+      - ../../patches/vllm-pr35936-required-fallback/vllm/entrypoints/openai/chat_completion/serving.py:/etc/club3090/pr35936-chat-completion-serving.py:ro
+      - ../../patches/vllm-pr35936-required-fallback/vllm/entrypoints/openai/engine/serving.py:/etc/club3090/pr35936-engine-serving.py:ro
+      - ../../patches/vllm-pr35936-required-fallback/install.sh:/etc/club3090/install-pr35936.sh:ro
       # froggeric/Qwen-Fixed-Chat-Templates qwen3.6 — fixes 7 default-template
       # bugs (empty <think></think> spam, </thinking> hallucination, unclosed
       # think before tool call, no-user-query crash, developer role, etc.).
@@ -275,6 +281,9 @@ services:
           echo "         bash scripts/setup.sh qwen3.6-27b" >&2
           exit 1
         fi
+        # Install PR #35936 overlay BEFORE Genesis runs so Genesis can write hooks
+        # to chat_completion/serving.py without hitting RO-mount errors.
+        bash /etc/club3090/install-pr35936.sh
         python3 -m vllm._genesis.patches.apply_all
         # Tool-parser deferred-commit fix for qwen3coder SSE-silence bug (issue #72).
         # Drops out when vllm-project/vllm lands the upstream fix.
