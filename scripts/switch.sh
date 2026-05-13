@@ -9,6 +9,7 @@
 # Usage:
 #   bash scripts/switch.sh <variant>           # switch + tail until ready
 #   bash scripts/switch.sh <variant> --no-wait # switch and return immediately
+#   bash scripts/switch.sh --force <variant>   # skip hardware/free-VRAM preflight
 #   bash scripts/switch.sh --list              # show all variants
 #   bash scripts/switch.sh --down              # just bring down whatever's up
 #
@@ -42,6 +43,8 @@
 #
 # Env overrides (rarely needed):
 #   COMPOSE_BIN     Default: "docker compose" (set to e.g. "podman compose" if needed)
+#   CLUB3090_GPU    Single-card GPU index override, e.g. "1" on a hetero rig
+#   FORCE           Set to 1 to skip hardware/free-VRAM preflight
 #   READY_URL       Default: http://localhost:8020/v1/models
 #   READY_TIMEOUT   Default: 600 (seconds — longer for cold cudagraph capture)
 
@@ -169,15 +172,23 @@ gpu_preflight() {
     return
   fi
   # Free MiB per GPU. Tolerate small overhead (driver, X server) — abort
-  # if any GPU has <80% of its total memory free.
+  # if any selected GPU has <80% of its total memory free.
   local mem_query
   mem_query=$(nvidia-smi --query-gpu=index,memory.free,memory.total --format=csv,noheader,nounits 2>/dev/null) || return
+  local selector="${NVIDIA_VISIBLE_DEVICES:-${CUDA_VISIBLE_DEVICES:-}}"
+  local selector_specific=0
+  if [[ -n "$selector" && "$selector" != "all" && "$selector" != "void" ]]; then
+    selector_specific=1
+  fi
   local bad=0
   while IFS=',' read -r idx free total; do
     free=$(echo "$free" | tr -d ' ')
     total=$(echo "$total" | tr -d ' ')
     idx=$(echo "$idx" | tr -d ' ')
     [[ -z "$free" || -z "$total" ]] && continue
+    if [[ "$selector_specific" -eq 1 && ",${selector}," != *",${idx},"* ]]; then
+      continue
+    fi
     # Require ≥80% free. Compose default gpu-memory-utilization is 0.92.
     local need=$(( total * 80 / 100 ))
     if [[ "$free" -lt "$need" ]]; then
@@ -241,8 +252,12 @@ up_variant() {
     preflight_genesis_pin "${ROOT_DIR}" || true
     preflight_repo_drift "${ROOT_DIR}" || true
     preflight_compose_deps "${full_dir}/${file}" || exit 1
+    if [[ "$eng" == "vllm" ]]; then
+      preflight_compose_hardware "${full_dir}/${file}" "$v" "${FORCE:-0}" || exit 1
+    fi
     preflight_kv_format_hint "${full_dir}/${file}" || true
   fi
+  gpu_preflight
 
   echo "[switch] bringing up: ${v}  (${dir}/${file})"
   (cd "${full_dir}" && ${COMPOSE_BIN} -f "${file}" up -d)
@@ -319,24 +334,31 @@ wait_ready() {
 
 # --- arg parsing ---
 WAIT=1
-case "${1:-}" in
-  -h|--help|"") usage ;;
-  --list) list_variants ;;
-  --down) down_running; exit 0 ;;
-esac
-
-VARIANT="$1"
-shift || true
-for arg in "$@"; do
-  case "$arg" in
+FORCE="${FORCE:-0}"
+VARIANT=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help) usage ;;
+    --list) list_variants ;;
+    --down) down_running; exit 0 ;;
     --no-wait) WAIT=0 ;;
-    *) echo "Unknown flag: $arg"; exit 1 ;;
+    --force) FORCE=1 ;;
+    --*) echo "Unknown flag: $1"; exit 1 ;;
+    *)
+      if [[ -n "$VARIANT" ]]; then
+        echo "ERROR: multiple variants supplied: '${VARIANT}' and '$1'" >&2
+        exit 1
+      fi
+      VARIANT="$1"
+      ;;
   esac
+  shift
 done
+
+[[ -n "$VARIANT" ]] || usage
 
 resolve_ready_url "${VARIANT}"
 down_running
-gpu_preflight
 up_variant "${VARIANT}"
 [[ $WAIT -eq 1 ]] && wait_ready
 echo "[switch] done. Try:  curl -s ${READY_URL%/v1/models}/v1/models | jq ."

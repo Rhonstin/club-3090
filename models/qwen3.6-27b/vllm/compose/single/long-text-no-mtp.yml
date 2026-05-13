@@ -109,6 +109,10 @@
 #   cd <repo>/models/qwen3.6-27b/vllm/compose
 #   docker compose -f single/long-text.yml up -d
 # ===========================================================================
+# Hardware metadata (parsed by scripts/preflight.sh):
+# Requires-min-vram-gb: 24
+# Requires-min-gpu-count: 1
+# Tensor-parallel: 1
 services:
   vllm-qwen36-27b-long-text-no-mtp:
     image: vllm/vllm-openai:nightly-1acd67a795ebccdf9b9db7697ae9082058301657
@@ -151,6 +155,7 @@ services:
       # https://huggingface.co/froggeric/Qwen-Fixed-Chat-Templates
       - ../../patches/froggeric-chat-template/chat_template.jinja:/etc/qwen-froggeric-chat-template.jinja:ro
     environment:
+      - NVIDIA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES:-all}
       # Uncomment the next line to pin to a specific GPU (e.g. GPU 0):
       # - CUDA_VISIBLE_DEVICES=0
       - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN:-}

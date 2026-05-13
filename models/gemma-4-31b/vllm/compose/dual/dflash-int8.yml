@@ -93,6 +93,10 @@
 #   1. PR #41703 z-lab DFlash drafter — see ../../patches/vllm-gemma4-dflash/README
 #   2. PR #40391 per-token-head — see ../../patches/vllm-gemma4-dflash-int8/README
 # ===========================================================================
+# Hardware metadata (parsed by scripts/preflight.sh):
+# Requires-min-vram-gb: 24
+# Requires-min-gpu-count: 2
+# Tensor-parallel: 2
 services:
   vllm-gemma-4-31b-dflash-int8:
     # SAME pin as dual-dflash.yml — DFlash overlay was rebased to e47c98ef.
@@ -139,6 +143,7 @@ services:
       - ../../patches/vllm-gemma4-dflash-int8/v1/worker/kv_cache_shape_utils.py:/usr/local/lib/python3.12/dist-packages/vllm/v1/worker/kv_cache_shape_utils.py:ro
       # --------------------------------------------------------------------
     environment:
+      - NVIDIA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES:-all}
       - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN:-}
       - VLLM_WORKER_MULTIPROC_METHOD=spawn
       - NCCL_CUMEM_ENABLE=0

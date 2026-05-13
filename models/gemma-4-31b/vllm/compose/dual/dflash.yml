@@ -65,6 +65,10 @@
 #   - default (auto = bfloat16) → sidesteps all the above.
 # Smaller KV pool than fp8 would give but it's the only Ampere-shippable.
 # ===========================================================================
+# Hardware metadata (parsed by scripts/preflight.sh):
+# Requires-min-vram-gb: 24
+# Requires-min-gpu-count: 2
+# Tensor-parallel: 2
 services:
   vllm-gemma-4-31b-dflash:
     # Nightly bumped to 2026-05-06 to match rebase target proximity (Codex
@@ -104,6 +108,7 @@ services:
       - ../../patches/vllm-gemma4-dflash/v1/worker/gpu_model_runner.py:/usr/local/lib/python3.12/dist-packages/vllm/v1/worker/gpu_model_runner.py:ro
       # --------------------------------------------------------------------
     environment:
+      - NVIDIA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES:-all}
       - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN:-}
       - VLLM_WORKER_MULTIPROC_METHOD=spawn
       - NCCL_CUMEM_ENABLE=0

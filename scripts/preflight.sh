@@ -12,6 +12,7 @@
 #   preflight_running         — warn if a club-3090 container is already up
 #   preflight_genesis_pin     — warn if on-disk Genesis tree differs from setup.sh's pin
 #   preflight_repo_drift      — warn if local HEAD is behind origin/master
+#   preflight_compose_hardware— check compose VRAM/GPU-count/SM metadata
 #
 # Style: each function prints one or more "[preflight] ..." lines.
 # Hard failures get a one-line ERROR + a "Fix:" hint.
@@ -19,6 +20,12 @@
 # Avoid double-sourcing.
 [[ -n "${_PREFLIGHT_LOADED:-}" ]] && return 0
 _PREFLIGHT_LOADED=1
+_PREFLIGHT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
+if [[ -f "${_PREFLIGHT_DIR}/lib/compose-meta.sh" ]]; then
+  # shellcheck source=lib/compose-meta.sh
+  source "${_PREFLIGHT_DIR}/lib/compose-meta.sh"
+fi
 
 preflight_docker() {
   if ! command -v docker >/dev/null 2>&1; then
@@ -69,6 +76,301 @@ preflight_gpu() {
     echo "                   with 'unknown runtime' or 'could not select device driver', install:" >&2
     echo "                   https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/" >&2
   fi
+  return 0
+}
+
+_preflight_trim() {
+  local value="$1"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  printf '%s' "$value"
+}
+
+_preflight_csv_token() {
+  local value="$1"
+  value="$(_preflight_trim "$value")"
+  printf '%s' "$value"
+}
+
+_preflight_selector() {
+  if [[ -n "${CLUB3090_GPU:-}" ]]; then
+    printf '%s' "${CLUB3090_GPU}"
+  elif [[ -n "${NVIDIA_VISIBLE_DEVICES:-}" && "${NVIDIA_VISIBLE_DEVICES}" != "all" && "${NVIDIA_VISIBLE_DEVICES}" != "void" ]]; then
+    printf '%s' "${NVIDIA_VISIBLE_DEVICES}"
+  elif [[ -n "${CUDA_VISIBLE_DEVICES:-}" && "${CUDA_VISIBLE_DEVICES}" != "all" && "${CUDA_VISIBLE_DEVICES}" != "void" ]]; then
+    printf '%s' "${CUDA_VISIBLE_DEVICES}"
+  fi
+}
+
+_preflight_selector_is_specific() {
+  local selector="${1:-}"
+  [[ -n "$selector" && "$selector" != "all" && "$selector" != "void" ]]
+}
+
+_preflight_selector_allows_index() {
+  local selector="$1"
+  local idx="$2"
+  local token
+
+  if ! _preflight_selector_is_specific "$selector"; then
+    return 0
+  fi
+
+  IFS=',' read -ra _preflight_selector_tokens <<< "$selector"
+  for token in "${_preflight_selector_tokens[@]}"; do
+    token="$(_preflight_trim "$token")"
+    [[ "$token" == "$idx" ]] && return 0
+  done
+  return 1
+}
+
+_preflight_selector_first_numeric() {
+  local selector="$1"
+  local token
+
+  IFS=',' read -ra _preflight_selector_tokens <<< "$selector"
+  for token in "${_preflight_selector_tokens[@]}"; do
+    token="$(_preflight_trim "$token")"
+    if [[ "$token" =~ ^[0-9]+$ ]]; then
+      printf '%s' "$token"
+      return 0
+    fi
+  done
+  return 1
+}
+
+_preflight_sm_to_int() {
+  local sm="$1"
+  sm="${sm%%+}"
+  sm="${sm//sm_/}"
+  sm="${sm//SM_/}"
+  sm="${sm// /}"
+  [[ -z "$sm" ]] && { echo 0; return; }
+
+  local major minor
+  if [[ "$sm" == *.* ]]; then
+    major="${sm%%.*}"
+    minor="${sm#*.}"
+  else
+    major="$sm"
+    minor="0"
+  fi
+  major="${major//[^0-9]/}"
+  minor="${minor//[^0-9]/}"
+  [[ -z "$major" ]] && major=0
+  [[ -z "$minor" ]] && minor=0
+  if [[ "${#minor}" -eq 1 ]]; then
+    minor=$(( minor * 10 ))
+  else
+    minor="${minor:0:2}"
+    [[ -z "$minor" ]] && minor=0
+  fi
+  echo $(( major * 100 + minor ))
+}
+
+_preflight_vram_gb() {
+  local mib="$1"
+  echo $(( (mib + 1023) / 1024 ))
+}
+
+_preflight_hardware_suggestions() {
+  local variant="${1:-}"
+
+  echo "[preflight]" >&2
+  echo "[preflight] Suggested next steps:" >&2
+  echo "[preflight]   - Pick a compose that matches the detected GPU VRAM/topology." >&2
+  if [[ "$variant" == vllm/gemma-mtp-tp1 ]]; then
+    echo "[preflight]   - On 2x 24 GB cards, use:  bash scripts/switch.sh vllm/gemma-mtp" >&2
+  fi
+  echo "[preflight]   - On a single 24 GB card, start with:  bash scripts/switch.sh vllm/default" >&2
+  echo "[preflight]   - For maximum compatibility, use:  bash scripts/switch.sh llamacpp/default" >&2
+  echo "[preflight]   - Explicit bypass:  bash scripts/switch.sh --force ${variant:-<variant>}" >&2
+}
+
+# preflight_compose_hardware <compose_file> [variant] [force]
+#
+# Reads compose header metadata and checks the target host before docker compose
+# starts. This is intentionally conservative:
+#   - Missing metadata warns and allows the boot.
+#   - TP=1 composes auto-select the largest eligible GPU unless the user set
+#     CLUB3090_GPU, CUDA_VISIBLE_DEVICES, or NVIDIA_VISIBLE_DEVICES.
+#   - TP>=2 composes hard-fail only on insufficient GPU count or hard SM gates;
+#     heterogeneous VRAM below the requested floor warns because advanced users
+#     may be validating sub-24 GB configs with tuned memory-utilization.
+preflight_compose_hardware() {
+  local compose_file="$1"
+  local variant="${2:-}"
+  local force="${3:-${FORCE:-0}}"
+
+  if [[ "${PREFLIGHT_NO_HARDWARE:-0}" == "1" ]]; then
+    return 0
+  fi
+  if [[ "$force" == "1" || "${FORCE:-0}" == "1" ]]; then
+    echo "[preflight] hardware: skipped (--force/FORCE=1)"
+    return 0
+  fi
+  if [[ ! -f "$compose_file" ]]; then
+    echo "[preflight] ERROR: compose file not found: $compose_file" >&2
+    return 1
+  fi
+  if ! command -v nvidia-smi >/dev/null 2>&1; then
+    echo "[preflight] WARN:  nvidia-smi not found; skipping compose hardware metadata check." >&2
+    return 0
+  fi
+  if ! declare -F compose_meta_get >/dev/null 2>&1; then
+    echo "[preflight] WARN:  compose metadata parser unavailable; skipping hardware metadata check." >&2
+    return 0
+  fi
+
+  local min_vram_gb min_gpu_count tp requires_sm
+  min_vram_gb="$(compose_meta_get "$compose_file" requires-min-vram-gb || true)"
+  min_gpu_count="$(compose_meta_get "$compose_file" requires-min-gpu-count || true)"
+  tp="$(compose_meta_get "$compose_file" tensor-parallel || true)"
+  requires_sm="$(compose_meta_get "$compose_file" requires-sm || true)"
+
+  if [[ -z "$min_vram_gb" || -z "$min_gpu_count" || -z "$tp" ]]; then
+    echo "[preflight] WARN:  compose has no hardware metadata; allowing boot: $compose_file" >&2
+    return 0
+  fi
+
+  requires_sm="${requires_sm:-0.0}"
+  local required_sm_int
+  required_sm_int="$(_preflight_sm_to_int "$requires_sm")"
+
+  local gpu_query
+  gpu_query="$(nvidia-smi --query-gpu=index,name,memory.total,compute_cap --format=csv,noheader,nounits 2>/dev/null || true)"
+  if [[ -z "$gpu_query" ]]; then
+    echo "[preflight] WARN:  could not query GPU VRAM/SM via nvidia-smi; skipping hardware metadata check." >&2
+    return 0
+  fi
+
+  local selector
+  selector="$(_preflight_selector || true)"
+
+  local total_count=0 selected_count=0 eligible_count=0 selected_below_vram=0 selected_below_sm=0
+  local best_idx="" best_name="" best_mib=0 best_sm=""
+  local first_idx="" first_name="" first_mib=0 first_sm=""
+  local idx name mem_mib sm rest vram_gb sm_int
+
+  while IFS=',' read -r idx name mem_mib sm rest; do
+    idx="$(_preflight_csv_token "$idx")"
+    name="$(_preflight_csv_token "$name")"
+    mem_mib="$(_preflight_csv_token "$mem_mib")"
+    sm="$(_preflight_csv_token "$sm")"
+    [[ -z "$idx" || -z "$mem_mib" ]] && continue
+    total_count=$(( total_count + 1 ))
+    _preflight_selector_allows_index "$selector" "$idx" || continue
+
+    selected_count=$(( selected_count + 1 ))
+    if [[ -z "$first_idx" ]]; then
+      first_idx="$idx"
+      first_name="$name"
+      first_mib="$mem_mib"
+      first_sm="$sm"
+    fi
+
+    vram_gb="$(_preflight_vram_gb "$mem_mib")"
+    sm_int="$(_preflight_sm_to_int "$sm")"
+
+    if (( vram_gb < min_vram_gb )); then
+      selected_below_vram=1
+    fi
+    if (( sm_int < required_sm_int )); then
+      selected_below_sm=1
+    fi
+
+    if (( vram_gb >= min_vram_gb && sm_int >= required_sm_int )); then
+      eligible_count=$(( eligible_count + 1 ))
+      if (( mem_mib > best_mib )); then
+        best_idx="$idx"
+        best_name="$name"
+        best_mib="$mem_mib"
+        best_sm="$sm"
+      fi
+    fi
+  done <<< "$gpu_query"
+
+  if (( total_count == 0 )); then
+    echo "[preflight] ERROR: no NVIDIA GPUs detected." >&2
+    _preflight_hardware_suggestions "$variant"
+    return 1
+  fi
+  if (( selected_count == 0 )); then
+    echo "[preflight] ERROR: GPU selector '${selector}' did not match any detected GPU index." >&2
+    _preflight_hardware_suggestions "$variant"
+    return 1
+  fi
+
+  local requires_sm_display="${requires_sm%%+}"
+  local sm_label=""
+  if (( required_sm_int > 0 )); then
+    sm_label=", sm_${requires_sm_display}+"
+  fi
+
+  if (( tp <= 1 )); then
+    if _preflight_selector_is_specific "$selector"; then
+      local first_vram_gb first_sm_int
+      first_vram_gb="$(_preflight_vram_gb "$first_mib")"
+      first_sm_int="$(_preflight_sm_to_int "$first_sm")"
+      if (( first_vram_gb < min_vram_gb || first_sm_int < required_sm_int )); then
+        echo "[preflight] ERROR: ${variant:-compose} requires one GPU with >=${min_vram_gb} GB VRAM${sm_label}." >&2
+        echo "[preflight]        Explicit selector '${selector}' starts with GPU ${first_idx}: ${first_name}, ${first_vram_gb} GB, sm_${first_sm}." >&2
+        _preflight_hardware_suggestions "$variant"
+        return 1
+      fi
+      export CLUB3090_GPU="${CLUB3090_GPU:-$selector}"
+      export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-$selector}"
+      export NVIDIA_VISIBLE_DEVICES="${NVIDIA_VISIBLE_DEVICES:-$selector}"
+      echo "[preflight] hardware: ${variant:-compose} TP=1 requires >=${min_vram_gb} GB${sm_label}; using explicit GPU ${first_idx} (${first_vram_gb} GB, sm_${first_sm})"
+      return 0
+    fi
+
+    if (( eligible_count == 0 )); then
+      echo "[preflight] ERROR: ${variant:-compose} requires one GPU with >=${min_vram_gb} GB VRAM${sm_label}; none found." >&2
+      echo "[preflight]        Detected GPUs:" >&2
+      while IFS=',' read -r idx name mem_mib sm rest; do
+        idx="$(_preflight_csv_token "$idx")"
+        name="$(_preflight_csv_token "$name")"
+        mem_mib="$(_preflight_csv_token "$mem_mib")"
+        sm="$(_preflight_csv_token "$sm")"
+        [[ -z "$idx" || -z "$mem_mib" ]] && continue
+        echo "[preflight]          GPU ${idx}: ${name}, $(_preflight_vram_gb "$mem_mib") GB, sm_${sm}" >&2
+      done <<< "$gpu_query"
+      _preflight_hardware_suggestions "$variant"
+      return 1
+    fi
+
+    export CLUB3090_GPU="$best_idx"
+    export CUDA_VISIBLE_DEVICES="$best_idx"
+    export NVIDIA_VISIBLE_DEVICES="$best_idx"
+    echo "[preflight] hardware: ${variant:-compose} TP=1 requires >=${min_vram_gb} GB${sm_label}; auto-selected GPU ${best_idx} ($(_preflight_vram_gb "$best_mib") GB, sm_${best_sm})"
+    return 0
+  fi
+
+  if (( selected_count < min_gpu_count )); then
+    echo "[preflight] ERROR: ${variant:-compose} requires ${min_gpu_count} visible GPU(s) for TP=${tp}; found ${selected_count}." >&2
+    _preflight_hardware_suggestions "$variant"
+    return 1
+  fi
+  if (( selected_below_sm == 1 )); then
+    echo "[preflight] ERROR: ${variant:-compose} requires sm_${requires_sm_display}+ on visible GPUs." >&2
+    while IFS=',' read -r idx name mem_mib sm rest; do
+      idx="$(_preflight_csv_token "$idx")"
+      name="$(_preflight_csv_token "$name")"
+      mem_mib="$(_preflight_csv_token "$mem_mib")"
+      sm="$(_preflight_csv_token "$sm")"
+      _preflight_selector_allows_index "$selector" "$idx" || continue
+      echo "[preflight]          GPU ${idx}: ${name}, $(_preflight_vram_gb "$mem_mib") GB, sm_${sm}" >&2
+    done <<< "$gpu_query"
+    _preflight_hardware_suggestions "$variant"
+    return 1
+  fi
+  if (( selected_below_vram == 1 )); then
+    echo "[preflight] WARN:  ${variant:-compose} requires >=${min_vram_gb} GB per visible GPU for TP=${tp}, but at least one selected GPU is smaller." >&2
+    echo "[preflight]        Continuing because TP>=2 sub-24 GB rigs may use tuned gpu-memory-utilization/KV settings." >&2
+  fi
+
+  echo "[preflight] hardware: ${variant:-compose} TP=${tp} requires ${min_gpu_count} GPU(s), >=${min_vram_gb} GB each${sm_label}; ${selected_count} visible GPU(s) detected"
   return 0
 }
 
@@ -412,9 +714,19 @@ preflight_kv_format_hint() {
     return 0
   fi
 
-  # Detect smallest VRAM among visible cards (the TP-split ceiling).
-  local min_vram_mib
-  min_vram_mib="$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | sort -n | head -1)"
+  # Detect smallest VRAM among selected/visible cards (the TP-split ceiling).
+  local min_vram_mib="" mem_query selector idx mem_mib
+  selector="$(_preflight_selector || true)"
+  mem_query="$(nvidia-smi --query-gpu=index,memory.total --format=csv,noheader,nounits 2>/dev/null || true)"
+  while IFS=',' read -r idx mem_mib; do
+    idx="$(_preflight_csv_token "$idx")"
+    mem_mib="$(_preflight_csv_token "$mem_mib")"
+    [[ -z "$idx" || -z "$mem_mib" ]] && continue
+    _preflight_selector_allows_index "$selector" "$idx" || continue
+    if [[ -z "$min_vram_mib" || "$mem_mib" -lt "$min_vram_mib" ]]; then
+      min_vram_mib="$mem_mib"
+    fi
+  done <<< "$mem_query"
   if [[ -z "$min_vram_mib" ]] || [[ "$min_vram_mib" -ge 24000 ]]; then
     return 0   # 24 GB+ cards — TQ3 is the right pick, no hint needed
   fi

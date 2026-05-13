@@ -20,6 +20,10 @@
 # Run:
 #   docker compose -f dual/bf16.yml up -d
 # ===========================================================================
+# Hardware metadata (parsed by scripts/preflight.sh):
+# Requires-min-vram-gb: 24
+# Requires-min-gpu-count: 2
+# Tensor-parallel: 2
 services:
   vllm-qwen36-27b-dual-bf16:
     # Same vLLM nightly as gemma-4-31b/vllm/compose/dual/bf16.yml — 2026-05-08
@@ -59,6 +63,7 @@ services:
       # https://huggingface.co/froggeric/Qwen-Fixed-Chat-Templates
       - ../../patches/froggeric-chat-template/chat_template.jinja:/etc/qwen-froggeric-chat-template.jinja:ro
     environment:
+      - NVIDIA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES:-all}
       - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN:-}
       - VLLM_WORKER_MULTIPROC_METHOD=spawn
       - NCCL_CUMEM_ENABLE=0

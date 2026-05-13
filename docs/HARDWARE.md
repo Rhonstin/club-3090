@@ -33,6 +33,22 @@ The recipes are written against 3090 specifically but should work on:
 
 **Won't work:** anything with <20 GB VRAM (3060, 3070, stock 3080, 3080 Ti). The 27B model in INT4 is ~18 GB — KV pool + activations push past 24 GB on smaller cards even with aggressive quantization. **Modded 20 GB 3080s do work** (see row above) — the mod gives them enough headroom for the 27B + TQ K8V4 KV path on TP=2, with `mem-util=0.82` to absorb cudagraph profiling overhead.
 
+### Mismatched / heterogeneous GPUs
+
+`scripts/switch.sh` reads hardware metadata from the vLLM compose headers before starting Docker. The preflight checks required GPU count, per-GPU VRAM, tensor parallel size, and any hard SM floor.
+
+For TP=1 vLLM composes, `switch.sh` auto-selects the largest eligible GPU and exports it through `NVIDIA_VISIBLE_DEVICES`. On a mixed 16 GB + 24 GB rig, `bash scripts/switch.sh vllm/default` should pick the 24 GB card instead of trying to boot on GPU 0 blindly.
+
+Overrides:
+
+```bash
+CLUB3090_GPU=1 bash scripts/switch.sh vllm/default
+NVIDIA_VISIBLE_DEVICES=2,3 bash scripts/switch.sh vllm/dual
+bash scripts/switch.sh --force vllm/gemma-mtp-tp1
+```
+
+Use `--force` only when you are intentionally testing an unsupported combo. Example: `vllm/gemma-mtp-tp1` is now preflight-blocked on a 24 GB 3090 because the compose is preserved for 32 GB / newer-SM single-card rigs.
+
 ### Note for sub-24 GB cards
 
 On 20 GB cards (modded 3080) the cudagraph-profiling overhead is a meaningful slice of available VRAM. Drop `--gpu-memory-utilization` to **0.82** (vs shipped 0.95 for 24 GB). vLLM nightly's `gpu_worker.py` reports the equivalent effective KV size in the boot log; tune to keep activation headroom for the ~15K tool-prefill peak (verify-full check 8). Credit: [@troymroberts](https://github.com/troymroberts).

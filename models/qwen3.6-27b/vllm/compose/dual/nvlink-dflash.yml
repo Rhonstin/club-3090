@@ -71,6 +71,10 @@
 #   cd <repo>/models/qwen3.6-27b/vllm/compose
 #   docker compose -f dual/nvlink-dflash.yml up -d
 # ===========================================================================
+# Hardware metadata (parsed by scripts/preflight.sh):
+# Requires-min-vram-gb: 24
+# Requires-min-gpu-count: 2
+# Tensor-parallel: 2
 services:
   vllm-qwen36-27b-dual-nvlink-dflash:
     image: vllm/vllm-openai:nightly-1acd67a795ebccdf9b9db7697ae9082058301657
@@ -105,6 +109,7 @@ services:
       # https://huggingface.co/froggeric/Qwen-Fixed-Chat-Templates
       - ../../patches/froggeric-chat-template/chat_template.jinja:/etc/qwen-froggeric-chat-template.jinja:ro
     environment:
+      - NVIDIA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES:-all}
       - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN:-}
       - VLLM_WORKER_MULTIPROC_METHOD=spawn
       # NVLink bridge present — let NCCL use P2P (don't disable it the way

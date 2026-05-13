@@ -33,6 +33,10 @@
 #   cd <repo>/models/qwen3.6-27b/vllm/compose
 #   docker compose -f dual/qwopus-bf16mtp.yml up -d
 # ===========================================================================
+# Hardware metadata (parsed by scripts/preflight.sh):
+# Requires-min-vram-gb: 24
+# Requires-min-gpu-count: 2
+# Tensor-parallel: 2
 services:
   vllm-qwopus-bf16mtp:
     image: vllm/vllm-openai:nightly-1acd67a795ebccdf9b9db7697ae9082058301657
@@ -58,6 +62,7 @@ services:
       - ../../patches/vllm-pr35936-required-fallback/vllm/entrypoints/openai/engine/serving.py:/etc/club3090/pr35936-engine-serving.py:ro
       - ../../patches/vllm-pr35936-required-fallback/install.sh:/etc/club3090/install-pr35936.sh:ro
     environment:
+      - NVIDIA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES:-all}
       - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN:-}
       - VLLM_WORKER_MULTIPROC_METHOD=spawn
       - NCCL_CUMEM_ENABLE=0

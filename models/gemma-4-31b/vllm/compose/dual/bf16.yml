@@ -89,6 +89,10 @@
 #   gh api repos/vllm-project/vllm/pulls/42006 --jq '.state, .merged_at'
 #   gh api repos/vllm-project/vllm/pulls/41991 --jq '.state, .merged_at'
 # ===========================================================================
+# Hardware metadata (parsed by scripts/preflight.sh):
+# Requires-min-vram-gb: 24
+# Requires-min-gpu-count: 2
+# Tensor-parallel: 2
 services:
   vllm-gemma-4-31b-mtp-bf16:
     image: vllm/vllm-openai:nightly-1acd67a795ebccdf9b9db7697ae9082058301657
@@ -118,6 +122,7 @@ services:
       - ../../patches/vllm-gemma4-tool-parser-fixes/tool_parsers/gemma4_tool_parser.py:/usr/local/lib/python3.12/dist-packages/vllm/tool_parsers/gemma4_tool_parser.py:ro
       # --------------------------------------------------------------------
     environment:
+      - NVIDIA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES:-all}
       - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN:-}
       - VLLM_WORKER_MULTIPROC_METHOD=spawn
       - NCCL_CUMEM_ENABLE=0

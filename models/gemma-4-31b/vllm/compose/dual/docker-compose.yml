@@ -48,6 +48,10 @@
 #   - default (auto = bfloat16) → sidesteps all fp8 kernel paths
 # Smaller KV pool than fp8 but at 32K test ctx that's not the bottleneck.
 # ===========================================================================
+# Hardware metadata (parsed by scripts/preflight.sh):
+# Requires-min-vram-gb: 24
+# Requires-min-gpu-count: 2
+# Tensor-parallel: 2
 services:
   vllm-gemma-4-31b-mtp:
     image: vllm/vllm-openai:nightly-1acd67a795ebccdf9b9db7697ae9082058301657
@@ -63,6 +67,7 @@ services:
       - ../../cache/triton:/root/.triton/cache
       # PR #41745 overlay dropped 2026-05-08: merged upstream + nightly contains it.
     environment:
+      - NVIDIA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES:-all}
       - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN:-}
       - VLLM_WORKER_MULTIPROC_METHOD=spawn
       - NCCL_CUMEM_ENABLE=0
