@@ -5,6 +5,7 @@
 # Usage:
 #   bash scripts/submit-bench.sh --tag <tag>
 #   bash scripts/submit-bench.sh --tag <tag> --auto-submit
+#   bash scripts/submit-bench.sh --tag <tag> --auto-submit --as-pr
 
 set -euo pipefail
 
@@ -13,6 +14,7 @@ cd "$ROOT_DIR"
 
 TAG=""
 AUTO_SUBMIT=0
+AS_PR=0
 SECTION_OVERRIDE=""
 
 usage() {
@@ -38,6 +40,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --auto-submit)
       AUTO_SUBMIT=1
+      shift
+      ;;
+    --as-pr)
+      AS_PR=1
       shift
       ;;
     --section)
@@ -135,6 +141,35 @@ PY
   fi
 }
 
+write_issue_body() {
+  local body_file="$1"
+  local row="$2"
+  local tag="$3"
+  local section="$4"
+
+  # The repo's numbers-from-your-rig issue template is a structured YAML form
+  # with required textarea/dropdown fields. `gh issue create --template` opens
+  # that interactive form shape, which is not useful once submit-bench has
+  # already generated the structured report. Use a direct markdown body instead.
+  {
+    echo "**Compose / section**: \`${section}\`"
+    echo
+    echo "**Rig**:"
+    echo
+    echo '```text'
+    cat "${TAG_DIR}/rig.txt"
+    echo '```'
+    echo
+    echo "**Proposed BENCHMARKS.md row**:"
+    echo
+    echo "$row"
+    echo
+    echo "**Full report**: \`results/rebench/${tag}/REPORT.md\`"
+    echo
+    echo "**Generated row file**: \`results/rebench/${tag}/BENCHMARKS-row.md\`"
+  } > "$body_file"
+}
+
 insert_row() {
   local section="$1"
   local row="$2"
@@ -186,8 +221,24 @@ PY
 }
 
 if [[ "$AUTO_SUBMIT" -ne 1 ]]; then
-  echo "Inspect at ${OUTPUT}. To submit:"
-  echo "  bash scripts/submit-bench.sh --tag ${TAG} --auto-submit"
+  cat <<EOF
+Inspect at ${OUTPUT}. Three ways to land it (recommended order):
+
+  1. Issue + maintainer integrates (preferred — vetting before merge):
+       bash scripts/submit-bench.sh --tag ${TAG} --auto-submit
+       (opens an issue via \`gh issue create\`)
+     Or, no-gh-needed:
+       https://github.com/noonghunna/club-3090/issues/new?template=numbers-from-your-rig.yml
+       — paste the contents of ${OUTPUT} + ${TAG_DIR}/rig.txt into the body
+
+  2. Direct PR (advanced — for contributors who know the matrix structure):
+       bash scripts/submit-bench.sh --tag ${TAG} --auto-submit --as-pr
+     Note: matrix is hand-curated; direct PRs may get redirected to an
+     issue thread for context-gathering before merge.
+
+  3. Manual edit (zero tools):
+       Paste the row from ${OUTPUT} into BENCHMARKS.md via the GitHub web editor.
+EOF
   exit 0
 fi
 
@@ -199,29 +250,49 @@ if [[ -n "$SECTION_OVERRIDE" ]]; then
   fi
 fi
 
-TITLE="bench(matrix): @${BENCH_ROW_GITHUB_USER} $(bench_row_rig_shortname "$TAG_DIR")"
+PR_TITLE="bench(matrix): @${BENCH_ROW_GITHUB_USER} $(bench_row_rig_shortname "$TAG_DIR")"
+ISSUE_TITLE="[bench] @${BENCH_ROW_GITHUB_USER} $(bench_row_rig_shortname "$TAG_DIR")"
 BRANCH_USER="$(printf '%s' "${BENCH_ROW_GITHUB_USER}" | tr -cd '[:alnum:]_.-')"
 BRANCH_TAG="$(printf '%s' "${TAG}" | tr -cd '[:alnum:]_.-')"
 BRANCH="bench/${BRANCH_USER}-${BRANCH_TAG}"
-BODY_FILE="$TAG_DIR/PR-body.md"
-write_pr_body "$BODY_FILE" "$ROW" "$TAG"
+if [[ "$AS_PR" -eq 1 ]]; then
+  BODY_FILE="$TAG_DIR/PR-body.md"
+  write_pr_body "$BODY_FILE" "$ROW" "$TAG"
+else
+  BODY_FILE="$TAG_DIR/ISSUE-body.md"
+  write_issue_body "$BODY_FILE" "$ROW" "$TAG" "$SECTION"
+fi
 
 if [[ "${GH_MOCK:-0}" == "1" ]]; then
   MOCK_LOG="$TAG_DIR/auto-submit-mock.log"
-  {
-    echo "git switch -c ${BRANCH}"
-    echo "insert BENCHMARKS.md row under: ${SECTION}"
-    echo "git commit -m ${TITLE}"
-    echo "git push -u origin ${BRANCH}"
-    echo "gh pr create --title ${TITLE} --body-file ${BODY_FILE}"
-  } > "$MOCK_LOG"
-  log "GH_MOCK=1 — wrote mocked auto-submit commands: ${MOCK_LOG}"
-  log "PR title: ${TITLE}"
+  if [[ "$AS_PR" -eq 1 ]]; then
+    {
+      echo "git switch -c ${BRANCH}"
+      echo "insert BENCHMARKS.md row under: ${SECTION}"
+      echo "git commit -m ${PR_TITLE}"
+      echo "git push -u origin ${BRANCH}"
+      echo "gh pr create --title ${PR_TITLE} --body-file ${BODY_FILE}"
+    } > "$MOCK_LOG"
+    log "GH_MOCK=1 — wrote mocked PR auto-submit commands: ${MOCK_LOG}"
+    log "PR title: ${PR_TITLE}"
+  else
+    {
+      echo "gh issue create --title ${ISSUE_TITLE} --body-file ${BODY_FILE} --label bench-contribution"
+    } > "$MOCK_LOG"
+    log "GH_MOCK=1 — wrote mocked issue auto-submit command: ${MOCK_LOG}"
+    log "Issue title: ${ISSUE_TITLE}"
+  fi
   exit 0
 fi
 
 command -v gh >/dev/null 2>&1 || die "'gh' not found. Install GitHub CLI or submit manually."
 gh auth status >/dev/null 2>&1 || die "not authed with gh. Run: gh auth login"
+
+if [[ "$AS_PR" -ne 1 ]]; then
+  ISSUE_URL="$(gh issue create --title "$ISSUE_TITLE" --body-file "$BODY_FILE" --label bench-contribution)"
+  log "Opened issue: ${ISSUE_URL}"
+  exit 0
+fi
 
 if ! git diff --quiet -- BENCHMARKS.md; then
   die "BENCHMARKS.md already has local edits; commit/stash them before --auto-submit"
@@ -235,7 +306,7 @@ else
 fi
 insert_row "$SECTION" "$ROW"
 git add BENCHMARKS.md
-git commit -m "$TITLE"
+git commit -m "$PR_TITLE"
 git push -u origin "$BRANCH"
-PR_URL="$(gh pr create --title "$TITLE" --body-file "$BODY_FILE")"
+PR_URL="$(gh pr create --title "$PR_TITLE" --body-file "$BODY_FILE")"
 log "Opened PR: ${PR_URL}"

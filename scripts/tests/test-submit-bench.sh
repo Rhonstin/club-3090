@@ -59,11 +59,15 @@ done
 tag="qwen-int8-pth-n4-2026-05-10"
 rm -f "results/rebench/${tag}/BENCHMARKS-row.md" \
       "results/rebench/${tag}/PR-body.md" \
+      "results/rebench/${tag}/ISSUE-body.md" \
       "results/rebench/${tag}/auto-submit-mock.log"
 
 out="$(bash scripts/submit-bench.sh --tag "$tag")"
 assert_contains "$out" "Generated BENCHMARKS row for section: Dual-card (2× RTX 3090, TP=2)"
 assert_contains "$out" "Wrote: results/rebench/${tag}/BENCHMARKS-row.md"
+assert_contains "$out" "1. Issue + maintainer integrates"
+assert_contains "$out" "2. Direct PR"
+assert_contains "$out" "3. Manual edit"
 test -s "results/rebench/${tag}/BENCHMARKS-row.md"
 
 if out="$(bash scripts/submit-bench.sh --tag does-not-exist 2>&1)"; then
@@ -73,14 +77,21 @@ fi
 assert_contains "$out" "tag dir not found: results/rebench/does-not-exist"
 
 out="$(GH_MOCK=1 GH_MOCK_USER=octocat bash scripts/submit-bench.sh --tag "$tag" --auto-submit)"
-assert_contains "$out" "PR title: bench(matrix): @octocat ${tag}"
+assert_contains "$out" "Issue title: [bench] @octocat ${tag}"
 test -s "results/rebench/${tag}/auto-submit-mock.log"
-assert_contains "$(cat "results/rebench/${tag}/auto-submit-mock.log")" "gh pr create --title bench(matrix): @octocat ${tag}"
+assert_contains "$(cat "results/rebench/${tag}/auto-submit-mock.log")" "gh issue create --title [bench] @octocat ${tag}"
+test -s "results/rebench/${tag}/ISSUE-body.md"
+assert_contains "$(cat "results/rebench/${tag}/ISSUE-body.md")" "results/rebench/${tag}/REPORT.md"
+assert_contains "$(cat "results/rebench/${tag}/ISSUE-body.md")" "Proposed BENCHMARKS.md row"
+
+out="$(GH_MOCK=1 GH_MOCK_USER=octocat bash scripts/submit-bench.sh --tag "$tag" --auto-submit --as-pr)"
+assert_contains "$out" "PR title: bench(matrix): @octocat ${tag}"
 test -s "results/rebench/${tag}/PR-body.md"
+assert_contains "$(cat "results/rebench/${tag}/auto-submit-mock.log")" "gh pr create --title bench(matrix): @octocat ${tag}"
 assert_contains "$(cat "results/rebench/${tag}/PR-body.md")" "results/rebench/${tag}/REPORT.md"
 
 tmp_bin="$(mktemp -d)"
-trap 'rm -rf "$tmp_bin"; rm -f "results/rebench/${tag}/BENCHMARKS-row.md" "results/rebench/${tag}/PR-body.md" "results/rebench/${tag}/auto-submit-mock.log"' EXIT
+trap 'rm -rf "$tmp_bin"; rm -f "results/rebench/${tag}/BENCHMARKS-row.md" "results/rebench/${tag}/PR-body.md" "results/rebench/${tag}/ISSUE-body.md" "results/rebench/${tag}/auto-submit-mock.log"' EXIT
 cat > "${tmp_bin}/gh" <<'MOCK_GH'
 #!/usr/bin/env bash
 if [[ "$1" == "auth" && "$2" == "status" ]]; then

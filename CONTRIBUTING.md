@@ -47,23 +47,35 @@ Two GitHub channels, two different shapes of conversation. Picking the right one
 
 ## Submitting your bench
 
-After running `bash scripts/rebench-full.sh`, contribute your numbers to `BENCHMARKS.md` with:
+The matrix is hand-curated — the canonical path is to file an **issue** with your rig + numbers; we'll review, ask clarifying questions, and integrate.
+
+After running `bash scripts/rebench-full.sh`, generate a paste-ready row:
 
 ```bash
 bash scripts/submit-bench.sh --tag <your-tag>
 ```
 
-This generates a paste-ready row at `results/rebench/<tag>/BENCHMARKS-row.md`. Review it, then either auto-submit or open the PR manually.
+The script writes `results/rebench/<tag>/BENCHMARKS-row.md`. To submit:
 
-Auto-submit opens a PR via GitHub CLI:
+### Path A — Auto-issue (recommended, requires `gh auth login`)
 
 ```bash
 bash scripts/submit-bench.sh --tag <your-tag> --auto-submit
 ```
 
-Manual path: paste the row into the appropriate `BENCHMARKS.md` section and open a PR yourself.
+Opens an issue via `gh issue create` with your rig + row pre-filled.
 
-Auto-submit assumes `gh auth status` is configured. If it is not, run `gh auth login` first.
+### Path B — Manual issue (no tools beyond browser)
+
+Open https://github.com/noonghunna/club-3090/issues/new?template=numbers-from-your-rig.yml and paste the row + your `rig.txt` into the body.
+
+### Path C — Direct PR (advanced)
+
+```bash
+bash scripts/submit-bench.sh --tag <your-tag> --auto-submit --as-pr
+```
+
+For contributors who know the `BENCHMARKS.md` section structure and want to propose the exact row. The maintainer may still redirect to an issue thread for context-gathering before merge — direct PRs aren't a fast-path bypass.
 
 ---
 
