@@ -76,7 +76,7 @@ services:
     # Hold this older pin (Genesis allowlist: 0.20.2rc1.dev9+g01d4d1ad3)
     # until Sander tags v7.73.x with a refreshed allowlist for the
     # post-#41434 main, then re-evaluate.
-    image: ghcr.io/noonghunna/vllm-club3090:latest
+    image: vllm/vllm-openai:nightly-01d4d1ad375dc5854779c593eee093bcebb0cada
     container_name: "${ESTATE_CONTAINER:-vllm-qwen36-27b-dual-tq3-mtp-genesis}"
     restart: "no"
     ports:

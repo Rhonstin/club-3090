@@ -67,7 +67,7 @@
 # Tensor-parallel: 4
 services:
   vllm-qwen36-27b-multi4-dflash:
-    image: ghcr.io/noonghunna/vllm-club3090:latest
+    image: vllm/vllm-openai:nightly-1acd67a795ebccdf9b9db7697ae9082058301657
     container_name: "${ESTATE_CONTAINER:-vllm-qwen36-27b-multi4-dflash}"
     restart: "no"
     ports:
