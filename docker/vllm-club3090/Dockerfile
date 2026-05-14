@@ -1,5 +1,6 @@
 ARG VLLM_BASE_IMAGE=vllm/vllm-openai:nightly-1acd67a795ebccdf9b9db7697ae9082058301657
 FROM ${VLLM_BASE_IMAGE}
+ARG VLLM_BASE_IMAGE
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
