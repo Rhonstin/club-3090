@@ -91,9 +91,11 @@ Per-model sections below derive each term concretely.
 | Model | Total layers | Growing layers | Sliding / fixed | KV heads | Head dim | K=V tied | MoE | Special notes |
 |---|---:|---:|---:|---:|---:|:---:|:---:|---|
 | **Qwen 3.6 27B** | 64 | 16 (full-attention) | 48 (GDN recurrent) | 4 | 256 | No (×2) | No | DeltaNet block-wise activation peak (Cliff 2). `linear_attn` in-proj stays fp16 even under INT4 quant. |
-| **Qwen 3.6 35B-A3B** | 40 | **10** (gated attention at idx 3,7,11,15,19,23,27,31,35,39) | 30 (Gated DeltaNet) | **2** | 256 | No (×2) | Yes — **256 experts × 8 active** | `full_attention_interval=4`: every 4th layer is attention. Built-in MTP (`mtp_num_hidden_layers=1`). `attn_output_gate=True` (gated attention). Vision-capable. Active params ~3B, total 35B. |
+| **Qwen 3.6 35B-A3B** | 40 | **10** (gated attention at idx 3,7,11,15,19,23,27,31,35,39) | 30 (Gated DeltaNet) | **2** | 256 | No (×2) | **Yes (256×8)** | `full_attention_interval=4`: every 4th layer is attention. Built-in MTP (`mtp_num_hidden_layers=1`). `attn_output_gate=True` (gated attention). Vision-capable. Active params ~3B, total 35B. |
 | **Gemma 4 31B** | 60 | 10 (full-attention) | 50 (SWA, window=1024) | 16 | 256 sliding / **512 global** | Yes (×1) | No | Global layers use 2× head_dim of sliding layers. K=V tying confirmed empirically against boot-log KV cache reports. |
-| **Gemma 4 26B-A4B** | **30** | **5** (full-attention at idx 5,11,17,23,29) | 25 (SWA, window=1024) | **8 sliding / 2 global** (asymmetric) | 256 sliding / **512 global** | **Yes (×1)** | Yes — **128 experts × 8 active** | Asymmetric KV-head split per layer type. Every 6th layer is global, last layer always global. Per-token growing KV is **~16× smaller** than Gemma 4 31B (see [Gemma section](#gemma-4-26b-a4b-moe--per-card-budget-components)). Vision + audio support. **No Genesis required.** |
+| **Gemma 4 26B-A4B** | **30** | **5** (full-attention at idx 5,11,17,23,29) | 25 (SWA, window=1024) | **8 sliding / 2 global** (asymmetric) | 256 sliding / **512 global** | **Yes (×1)** | **Yes (128×8)** | Asymmetric KV-head split per layer type. Every 6th layer is global, last layer always global. Per-token growing KV is **~16× smaller** than Gemma 4 31B (see [Gemma section](#gemma-4-26b-a4b-moe--per-card-budget-components)). Vision + audio support. **No Genesis required.** |
+
+> **MoE column format**: `N×K` = `num_experts × num_experts_per_tok` (e.g. "256×8" = 256 experts, 8 active per token).
 
 **Hybrid quirks to internalize:**
 
@@ -208,7 +210,7 @@ In the Qwen3-Next hybrid architecture, **only the 16 full_attention layers contr
 Applying the general formula:
 
 ```
-per_token_bytes = 16 (growing layers) × 4 (kv_heads) × 256 (head_dim) × 2 (no K=V tie) × bpe
+per_token_bytes = 16 (growing layers) × 4 (kv_heads) × 256 (head_dim) × 2 (k_v_tensors — no K=V tie) × bpe
                 = 32,768 × bpe bytes
 ```
 
@@ -268,7 +270,18 @@ overhead = 0.5 + 1.0 × mem_util + 0.3 × (TP - 1)   # GB
 
 This is rough — actual overhead depends on how many graphs vLLM captures, which depends on `max_num_seqs`, `compile_sizes`, and other internals.
 
-### 5. DFlash draft model
+### 5. DeltaNet recurrent state (per-stream, constant)
+
+The 48 GDN layers maintain a fixed-size recurrent state between tokens (separate from the block-wise intermediate during forward — that's the activation peak in §3). Concrete size for Qwen 3.6 27B:
+
+- K state: `16 × 128 × fp32 = 8 KB` per layer
+- V state: `48 × 128 × fp32 = 24 KB` per layer
+- Conv state: `4 × (16×128 + 48×128) × fp32 = ~128 KB` per layer
+- **Total per layer: ~160 KB** × 48 layers × `max_num_seqs` streams
+
+At `max_num_seqs=1`: ~7.5 MB total per card. At `max_num_seqs=4`: ~30 MB. Negligible vs activation peak (GB-scale) and KV pool (sub-GB). Listed for completeness; don't model in budget projections.
+
+### 6. DFlash draft model
 
 Only present on `dual-dflash*.yml` composes. `z-lab/Qwen3.6-27B-DFlash` is a ~1.75 GB draft model (per card, FP16). With TP > 1, the draft itself is sharded.
 
@@ -313,7 +326,7 @@ Like the dense Qwen 3.6 27B, DeltaNet `linear_attn` in-projection layers stay at
 Applying the general formula:
 
 ```
-per_token_bytes = 10 (growing layers) × 2 (kv_heads) × 256 (head_dim) × 2 (no K=V tie) × bpe
+per_token_bytes = 10 (growing layers) × 2 (kv_heads) × 256 (head_dim) × 2 (k_v_tensors — no K=V tie) × bpe
                 = 10,240 × bpe bytes
 ```
 
@@ -345,11 +358,22 @@ The activation peak should be **~60-70% of dense Qwen 3.6 27B's** (30/48 layers 
 
 MoE introduces a few new accounting items:
 
-- **Router workspace**: small (`hidden_size × num_experts` weights, ~100-200 MB). One-time cost, not per-token.
-- **Expert dispatch buffers**: vLLM allocates buffers for top-k expert routing. Empirical ~200-400 MB per card.
+- **Router workspace**: `hidden_size × num_experts × bf16_bytes = 2048 × 256 × 2 = ~1 MB` per router. Across 40 layers ≈ 40 MB. Tiny one-time cost.
+- **Expert dispatch buffers**: vLLM allocates buffers for top-k expert routing across all 256 experts. Empirical ~200-400 MB per card.
 - **No KV-side impact**: MoE only gates FFN compute. The KV cache for the gated-attention layers is unaffected.
 
-### 5. Cudagraph + workspace overhead
+### 5. DeltaNet recurrent state (per-stream, constant)
+
+The 30 GDN layers maintain a fixed-size recurrent state between tokens (separate from the block-wise intermediate during forward, which is the activation peak). Concrete size:
+
+- K state: `linear_num_k_heads × linear_k_head_dim × fp32 = 16 × 128 × 4 = 8 KB` per layer
+- V state: `linear_num_v_heads × linear_v_head_dim × fp32 = 32 × 128 × 4 = 16 KB` per layer
+- Conv state: `linear_conv_kernel_dim × (16×128 + 32×128) × fp32 = ~96 KB` per layer
+- **Total per layer: ~120 KB** × 30 layers × `max_num_seqs` streams
+
+At `max_num_seqs=1`: ~3.5 MB total per card. At `max_num_seqs=4`: ~14 MB. **Negligible** vs activation peak (which is GB-scale) and KV pool (sub-GB). Listed here for completeness; don't bother modelling in budget projections.
+
+### 6. Cudagraph + workspace overhead
 
 Same form as dense models:
 
@@ -401,7 +425,7 @@ Two shipped quants on this stack: AutoRound INT4 (default) and AWQ-4bit (Tier 2 
 Each stores K and V at `global_head_dim=512`, with K==V tying meaning a single store per element:
 
 ```
-per_token_bytes_growing = 10 (growing layers) × 16 (kv_heads) × 512 (global_head_dim) × 1 (K=V tied) × bpe
+per_token_bytes_growing = 10 (growing layers) × 16 (kv_heads) × 512 (global_head_dim) × 1 (k_v_tensors — K=V tied) × bpe
                         = 81,920 × bpe bytes
 ```
 
@@ -503,7 +527,7 @@ MoE expert weights all live in VRAM (sparse-activation at FLOPs level, not at me
 The asymmetric KV head count dramatically reduces per-token growing KV vs Gemma 4 31B:
 
 ```
-per_token_bytes_growing = num_full_attn_layers × num_global_kv_heads × global_head_dim × 1 (K=V tied) × bpe
+per_token_bytes_growing = num_full_attn_layers × num_global_kv_heads × global_head_dim × 1 (k_v_tensors — K=V tied) × bpe
                         = 5 × 2 × 512 × 1 × bpe
                         = 5,120 × bpe bytes
 ```
