@@ -16,6 +16,58 @@ history; SemVer takes over from `v0.3.0` onward.
 
 ---
 
+## v0.7.3 — 2026-05-15
+
+
+### ✨ Features
+
+- feat(report): surface kv-calc calibration verdict ([#143](https://github.com/noonghunna/club-3090/pull/143) by @noonghunna)
+- feat(kv-calc): model v0.7.3 MoE architectures ([39e1873](https://github.com/noonghunna/club-3090/commit/39e18733aa8f14c83a1f76d5bed23156fda61568))
+- feat(gemma-4-26b-a4b): AWQ + MTP n=4 — +12% narr / +49% code over no-MTP baseline ([6dc9a0d](https://github.com/noonghunna/club-3090/commit/6dc9a0dce1b4ecef787e50808a8a15439cabe209))
+- feat(qwen-35b-a3b): preview-MTP compose + bench row — MTP measured SLOWER on MoE ([e1d44bd](https://github.com/noonghunna/club-3090/commit/e1d44bd732cef0757b8d3f0f872b5b0a1a4fe5cc))
+- feat(vllm-pr41800): vendor truncate_prompt_tokens overlay across all pre-fix engines (closes #139) ([1d7aad1](https://github.com/noonghunna/club-3090/commit/1d7aad112c097709d954750ab0e725a785ad062a))
+- feat(gemma-4-26b-a4b): AWQ path via vLLM PR #40886 overlay ([0053444](https://github.com/noonghunna/club-3090/commit/0053444e84f80ce9f3fb910435c8d627591f59ed))
+- feat(estate): add parallel boot mode ([99328b4](https://github.com/noonghunna/club-3090/commit/99328b4cda7ec9efc723a001295525a6d1f86e2a))
+- feat(moe): add dual-card composes for Gemma 26B-A4B + Qwen 35B-A3B preview ([2d1b1dc](https://github.com/noonghunna/club-3090/commit/2d1b1dc347c3897f8b902f7ab60c8bd9c97abbeb))
+- feat(moe): wire Gemma 4 26B-A4B + Qwen 3.6 35B-A3B composes through fits() ([f7f6f44](https://github.com/noonghunna/club-3090/commit/f7f6f444b9e937396c3de70df7dd6a5b957be80b))
+- feat(profiles): split engine-pin policy by Genesis dependency ([15eda8a](https://github.com/noonghunna/club-3090/commit/15eda8a823dd273ee9b238369cba365021b61a29))
+- feat(profiles): add Gemma 4 26B-A4B ModelProfile + num_global_kv_heads field ([abf0e32](https://github.com/noonghunna/club-3090/commit/abf0e327f9b877f989fe16c88bda1a457c144e0a))
+- feat(profiles): add Qwen 3.6 35B-A3B ModelProfile (MoE schema extensions) ([9378714](https://github.com/noonghunna/club-3090/commit/937871492ae08b58b041a1fded41ab793f0c8549))
+
+
+### 🐛 Bug fixes
+
+- fix(gpu-mode): mode_off tears down estate-managed instances ([9cd854d](https://github.com/noonghunna/club-3090/commit/9cd854dbcb9b8b215876e0f88443c269072b93b9))
+- fix(qwen3.6-27b): route non-TQ3 composes to vllm-nightly-clean ([3b2d940](https://github.com/noonghunna/club-3090/commit/3b2d940d26ec2ffe6daf631e77986898c1d2849d))
+- fix(gemma-4-31b): route default/bf16 composes to vllm-nightly-clean ([cf0451a](https://github.com/noonghunna/club-3090/commit/cf0451a7ad5c56bd7b63327aac7178df70cba1fb))
+- fix(engines): vllm-nightly-mtp anchors to 01d4d1ad (Sander v7.72.2 PROD pin) ([87f0a0c](https://github.com/noonghunna/club-3090/commit/87f0a0c528473a225f06997bdcb9b79fefa13b04))
+
+
+### 📝 Documentation
+
+- docs(soak-test): clarify PASS verdict semantics — closes #140 ([9a039d8](https://github.com/noonghunna/club-3090/commit/9a039d8c922d3141102e8244d5468e8de46c6674))
+- docs(UPSTREAM): add PR #41800 truncate_prompt_tokens row ([273c017](https://github.com/noonghunna/club-3090/commit/273c017646087fe508626be7ecea5e2106be54be))
+- docs(README): add v0.7.3 MoE models to Supported Models table ([e49c939](https://github.com/noonghunna/club-3090/commit/e49c9397481b5fba226323b59c4fa37bdc2aeeab))
+- docs(BENCHMARKS): Gemma 4 26B-A4B AWQ first row + AutoRound row demoted ([92b69bd](https://github.com/noonghunna/club-3090/commit/92b69bd220ce8360d2dfd5fdcf89d26ee2264791))
+- docs(BENCHMARKS): add v0.7.3 MoE preview section ([bdfb939](https://github.com/noonghunna/club-3090/commit/bdfb939edd98c3872439a7a05dcde13cce7ccaa2))
+- docs(HARDWARE): add note on PCIe Gen 3 + older CPU TP=2 headwind ([8cf38b0](https://github.com/noonghunna/club-3090/commit/8cf38b05906e3954405af3db09a822ac87a25ae5))
+- docs(KERNEL_MATRIX): add KV Cache Impact subsection ([1a233cd](https://github.com/noonghunna/club-3090/commit/1a233cd9fd05a6ec51adfadae79813bc80cea4b0))
+- docs: add KERNEL_MATRIX.md (attention backend + engine support matrix) ([97195fe](https://github.com/noonghunna/club-3090/commit/97195fe443770bc8adc883755fd3baf9933df874))
+- docs(kv-math): extend k_v_tensors=N notation to sliding-KV formulas ([b1c68b4](https://github.com/noonghunna/club-3090/commit/b1c68b4fe3211af3442cd3bb7e9fd011e30e5554))
+- docs(kv-math): tighten k_v_tensors notation across all 4 formulas ([54d8bf0](https://github.com/noonghunna/club-3090/commit/54d8bf0b3e2b322dbd67e6939ff9f9995c642437))
+- docs(kv-math): third-pass Grok polish ([67de3ec](https://github.com/noonghunna/club-3090/commit/67de3eca3eb4b75b43fd0f83d2ed304976b3f1b5))
+- docs(kv-math): second-pass Grok polish ([78f94ca](https://github.com/noonghunna/club-3090/commit/78f94cacf006064f68d945122907d30be8723eec))
+- docs(kv-math): address Grok review feedback ([3114399](https://github.com/noonghunna/club-3090/commit/31143999837639b5a7d492d2f2b64e164787bcfe))
+- docs(kv-math): config-verify Qwen 35B-A3B + Gemma 26B-A4B MoE sections ([6ec6a67](https://github.com/noonghunna/club-3090/commit/6ec6a6761f36cca44ea819434be7205bcb6fdbc6))
+
+
+### 🧹 Maintenance
+
+- test(launch): align engine pin expectations ([127f4f6](https://github.com/noonghunna/club-3090/commit/127f4f6d8fe104a954b7865a4d7550017a1c629b))
+
+
+
+[Pin: `git checkout v0.7.3`] · [Full diff](https://github.com/noonghunna/club-3090/compare/v0.7.2...v0.7.3)
 ## v0.7.2 — 2026-05-15
 
 
