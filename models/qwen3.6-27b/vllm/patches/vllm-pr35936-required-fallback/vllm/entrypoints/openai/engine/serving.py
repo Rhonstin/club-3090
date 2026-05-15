@@ -38,11 +38,24 @@ from vllm.entrypoints.openai.engine.protocol import (
 )
 from vllm.entrypoints.openai.models.serving import OpenAIServingModels
 from vllm.entrypoints.openai.responses.protocol import ResponsesRequest
-from vllm.entrypoints.openai.speech_to_text.protocol import (
-    TranscriptionRequest,
-    TranscriptionResponse,
-    TranslationRequest,
-)
+# club-3090 patch: speech_to_text was relocated from
+# `vllm.entrypoints.openai.speech_to_text` (pre-bf610c2f) to
+# `vllm.entrypoints.speech_to_text` and split into transcription/ + translation/
+# subpackages. Try old path first (matches captured SHA), fall back to new.
+try:
+    from vllm.entrypoints.openai.speech_to_text.protocol import (
+        TranscriptionRequest,
+        TranscriptionResponse,
+        TranslationRequest,
+    )
+except ImportError:
+    from vllm.entrypoints.speech_to_text.transcription.protocol import (
+        TranscriptionRequest,
+        TranscriptionResponse,
+    )
+    from vllm.entrypoints.speech_to_text.translation.protocol import (
+        TranslationRequest,
+    )
 from vllm.entrypoints.serve.disagg.protocol import GenerateRequest, GenerateResponse
 from vllm.entrypoints.serve.tokenize.protocol import (
     DetokenizeRequest,
@@ -614,6 +627,19 @@ class OpenAIServing:
             return int(rank_str)
         except ValueError:
             return None
+
+    # club-3090 patch: bf610c2f's `chat_completion/serving.py`, `completion/serving.py`,
+    # and `responses/serving.py` call `self._with_kv_transfer_rejection_cleanup(...)`.
+    # The pre-bf610c2f base this overlay was captured against didn't define it.
+    # club-3090 doesn't run disaggregated KV-transfer / remote-prefill workflows,
+    # so this stub just delegates to the awaitable — the cleanup branch never fires.
+    async def _with_kv_transfer_rejection_cleanup(
+        self,
+        awaitable,
+        request,
+        raw_request,
+    ):
+        return await awaitable
 
     @staticmethod
     def _parse_tool_calls_from_content(

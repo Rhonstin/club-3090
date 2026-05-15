@@ -1358,9 +1358,13 @@ class OpenAIServingChat(OpenAIServing):
 
         request_metadata.final_usage_info = usage
 
+        # club-3090 patch: `prompt_routed_experts` was removed from
+        # `RequestOutput` in vLLM bf610c2f. Use getattr so the overlay tolerates
+        # both pre-bf610c2f and post-bf610c2f layouts. Dense path produces None.
+        _prompt_routed_experts_raw = getattr(final_res, "prompt_routed_experts", None)
         prompt_routed_experts = None
-        if final_res.prompt_routed_experts is not None:
-            prompt_routed_experts = final_res.prompt_routed_experts.tolist()
+        if _prompt_routed_experts_raw is not None:
+            prompt_routed_experts = _prompt_routed_experts_raw.tolist()
 
         response = ChatCompletionResponse(
             id=request_id,
