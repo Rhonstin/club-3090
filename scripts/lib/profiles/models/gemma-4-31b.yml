@@ -20,11 +20,15 @@ weights:
     size_gb: 18.0
     format: autoround
     status: production
+    hf_repos:
+      - Intel/gemma-4-31B-it-int4-AutoRound
   awq:
     path: gemma-4-31b-it-AWQ-4bit
     size_gb: 17.0
     format: awq
     status: production
+    hf_repos:
+      - cyankiwi/gemma-4-31B-it-AWQ-4bit
   bf16:
     path: gemma-4-31b-bf16
     size_gb: 58.0

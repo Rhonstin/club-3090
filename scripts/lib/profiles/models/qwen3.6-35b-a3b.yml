@@ -34,6 +34,10 @@ weights:
     size_gb: 20.0
     format: autoround
     status: production
+    # v0.8.0 Pull-Gate Tier-1 lookup slug (verified in
+    # vllm/compose/dual/preview.yml `target:` line).
+    hf_repos:
+      - Qwen/Qwen3-MoE-A3B-Instruct-AutoRound-Int4-mixed
   gptq_int4:
     path: qwen3.6-35b-a3b-gptq-int4
     size_gb: 22.0

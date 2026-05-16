@@ -22,6 +22,10 @@ weights:
     size_gb: 17.5
     format: autoround
     status: production
+    # v0.8.0 Pull-Gate Tier-1 lookup slugs (full HF repo ids).
+    hf_repos:
+      - Lorbus/Qwen3.6-27B-int4-AutoRound
+      - Intel/Qwen3.6-27B-int4-AutoRound
   awq:
     path: qwen3.6-27b-awq-int4
     size_gb: 17.0
@@ -37,11 +41,15 @@ weights:
     size_gb: 17.5
     format: autoround
     status: experimental
+    hf_repos:
+      - wasifb/Carnice_V2_27B_INT4_BF16MTP
   qwopus_bf16mtp:
     path: qwopus3.6-27b-int4-recipe-d-bf16mtp
     size_gb: 17.5
     format: autoround
     status: experimental
+    hf_repos:
+      - Jackrong/Qwopus3.6-27B-v1-preview
 default_weight_variant: autoround_int4
 compatible_drafters:
   - qwen-mtp-builtin

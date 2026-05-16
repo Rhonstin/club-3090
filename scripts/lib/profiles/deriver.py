@@ -1,0 +1,731 @@
+"""v0.8.0 Pull-Gate — `[A]` transformers deriver.
+
+Given an HF repo slug, derive a ModelProfile-shaped spec from the repo's own
+`config.json` + HF Hub model API (`?blobs=true` for LFS-resolved sizes) +
+a bounded, pre-download safetensors-header probe. This is the `[A]` slice
+that produces the spec P1's generic-dense `[B]` branch consumes.
+
+Public API (stable for P3/P4):
+
+    from scripts.lib.profiles import deriver
+
+    res = deriver.derive(slug, *, hf_token=None, hf_home=None, fetcher=None,
+                          profiles=None)
+    #   res: DeriveResult
+    #     .error           -> DeriverError | None  (stratum-1 structured error)
+    #     .tier1           -> Tier1Match | None     (curated lookup hit)
+    #     .confidence      -> Confidence enum
+    #     .generic_dense_eligible -> bool | None
+    #     .spec            -> dict | None   (kv-calc generic-dense spec shape)
+    #     .profile         -> dict | None   (derived ModelProfile-shaped dict)
+
+P2 ONLY classifies. The stratum-5 `no-fit-model` abort, `[C0]`/`[C2a]`/`[C1]`
+and the orchestrator are P3/P4 — this module never raises a traceback for a
+stratum-1 condition; it returns a structured `DeriverError`.
+
+Network: all HTTP goes through an injectable `fetcher` (see `HttpFetcher`).
+Tests pass a recorded-fixture fetcher so there is NO live network and NO
+weight file is ever downloaded — the header probe is range-bounded.
+
+How P1's kv-calc is imported (per the in-file import contract at
+`tools/kv-calc.py` ~line 645): via importlib, registering the module in
+`sys.modules["kv_calc"]` BEFORE `exec_module` so `@dataclass` resolves
+`cls.__module__`. See `_load_kv_calc()`.
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import json
+import os
+import struct
+import sys
+import urllib.error
+import urllib.request
+from dataclasses import dataclass, field
+from enum import Enum
+from pathlib import Path
+from typing import Any, Callable, Optional
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+_HF_API = "https://huggingface.co/api/models"
+_HF_RESOLVE = "https://huggingface.co"
+_NET_TIMEOUT = 30  # seconds (per brief)
+_MAX_HEADER_BYTES = 16 * 1024 * 1024  # 16 MiB safetensors-header ceiling
+
+# Name patterns that mark a *.safetensors blob as an adapter/LoRA, not a
+# complete weight set. Matched case-insensitively on the basename.
+_ADAPTER_PATTERNS = (
+    "adapter_model",
+    "adapter-model",
+    "lora",
+    "/adapter",
+)
+
+
+# ---------------------------------------------------------------------------
+# Structured stratum-1 errors (NEVER raised as raw tracebacks)
+# ---------------------------------------------------------------------------
+class DeriverErrorKind(str, Enum):
+    REPO_NOT_FOUND = "repo-not-found"
+    GATED_NO_TOKEN = "gated-no-token"
+    UNSUPPORTED_FORMAT = "unsupported-format"
+    AMBIGUOUS_WEIGHT_SET = "ambiguous-weight-set"
+    QUANT_DTYPE_UNKNOWN = "quant-dtype-unknown"
+
+
+@dataclass(frozen=True)
+class DeriverError:
+    """A stratum-1 structured error. Returned, never raised."""
+
+    kind: DeriverErrorKind
+    detail: str = ""
+
+    def __str__(self) -> str:  # pragma: no cover - cosmetic
+        return f"{self.kind.value}: {self.detail}" if self.detail else self.kind.value
+
+
+class Confidence(str, Enum):
+    """§4 confidence tiers. `DERIVED` is RESERVED for the future
+    override-registry phase and unused in v0.8.0."""
+
+    EXACT = "exact"
+    ESTIMATED_LOWER_BOUND = "estimated-lower-bound"
+    DERIVED = "derived"  # RESERVED — not assigned this phase
+    NOT_ELIGIBLE = "not-generic-dense-eligible"
+
+
+@dataclass(frozen=True)
+class Tier1Match:
+    """A curated lookup hit: slug ∈ a curated model variant's `hf_repos`."""
+
+    model_id: str
+    weights_variant: str
+    slug: str
+
+
+@dataclass
+class DeriveResult:
+    slug: str
+    error: Optional[DeriverError] = None
+    tier1: Optional[Tier1Match] = None
+    confidence: Optional[Confidence] = None
+    generic_dense_eligible: Optional[bool] = None
+    spec: Optional[dict[str, Any]] = None
+    profile: Optional[dict[str, Any]] = None
+    diagnostics: dict[str, Any] = field(default_factory=dict)
+
+
+# ---------------------------------------------------------------------------
+# HTTP fetcher abstraction (injectable for fixture-driven tests)
+# ---------------------------------------------------------------------------
+@dataclass
+class FetchResponse:
+    status: int
+    body: bytes
+
+
+class HttpFetcher:
+    """Real-network fetcher. Tests inject a recorded-fixture replacement.
+
+    `get(url, headers=None, range_=None)` returns a FetchResponse. HTTP errors
+    surface as the response's status (not exceptions) where the caller maps
+    them to structured stratum-1 errors; only true network failures raise
+    `NetworkError`.
+    """
+
+    timeout = _NET_TIMEOUT
+
+    def get(
+        self,
+        url: str,
+        headers: Optional[dict[str, str]] = None,
+        range_: Optional[tuple[int, int]] = None,
+    ) -> FetchResponse:
+        req_headers = dict(headers or {})
+        if range_ is not None:
+            lo, hi = range_
+            req_headers["Range"] = f"bytes={lo}-{hi}"
+        req = urllib.request.Request(url, headers=req_headers, method="GET")
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                return FetchResponse(status=resp.status, body=resp.read())
+        except urllib.error.HTTPError as exc:  # 4xx/5xx — surface status
+            try:
+                body = exc.read()
+            except Exception:  # pragma: no cover - defensive
+                body = b""
+            return FetchResponse(status=exc.code, body=body)
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            raise NetworkError(str(exc)) from exc
+
+
+class NetworkError(RuntimeError):
+    """True transport failure (timeout / DNS / connection). Distinct from an
+    HTTP status code, which the fetcher returns as a FetchResponse."""
+
+
+Fetcher = HttpFetcher  # type alias for callers
+
+
+# ---------------------------------------------------------------------------
+# kv-calc import (per the documented sys.modules contract)
+# ---------------------------------------------------------------------------
+_KV_CALC = None
+
+
+def _load_kv_calc():
+    """Load tools/kv-calc.py via importlib, registering it in sys.modules
+    BEFORE exec_module (required: kv-calc.py uses @dataclass, which resolves
+    cls.__module__ via sys.modules during class creation)."""
+    global _KV_CALC
+    if _KV_CALC is not None:
+        return _KV_CALC
+    if "kv_calc" in sys.modules:
+        _KV_CALC = sys.modules["kv_calc"]
+        return _KV_CALC
+    kv_path = REPO_ROOT / "tools" / "kv-calc.py"
+    spec = importlib.util.spec_from_file_location("kv_calc", kv_path)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["kv_calc"] = mod  # MUST precede exec_module
+    spec.loader.exec_module(mod)
+    _KV_CALC = mod
+    return _KV_CALC
+
+
+# ---------------------------------------------------------------------------
+# HF_HOME resolution (--hf-home > $HF_HOME > $XDG_CACHE_HOME/huggingface > ~)
+# ---------------------------------------------------------------------------
+def resolve_hf_home(hf_home: Optional[str] = None) -> Path:
+    if hf_home:
+        return Path(hf_home).expanduser()
+    env = os.environ.get("HF_HOME")
+    if env:
+        return Path(env).expanduser()
+    xdg = os.environ.get("XDG_CACHE_HOME")
+    if xdg:
+        return Path(xdg).expanduser() / "huggingface"
+    return Path.home() / ".cache" / "huggingface"
+
+
+# ---------------------------------------------------------------------------
+# Tier-1 curated lookup
+# ---------------------------------------------------------------------------
+def _tier1_lookup(slug: str, profiles) -> Optional[Tier1Match]:
+    """slug ∈ a curated model variant's `hf_repos` → that (model, variant).
+
+    Matched case-insensitively (per brief: `hf_repos` entries are full HF
+    slugs, matched case-insensitively)."""
+    needle = slug.strip().lower()
+    for model in profiles.models.values():
+        for variant, meta in model.weights.items():
+            for repo in meta.get("hf_repos", []) or []:
+                if str(repo).strip().lower() == needle:
+                    return Tier1Match(
+                        model_id=model.id, weights_variant=variant, slug=str(repo)
+                    )
+    return None
+
+
+# ---------------------------------------------------------------------------
+# HF fetch helpers
+# ---------------------------------------------------------------------------
+def _auth_headers(hf_token: Optional[str]) -> dict[str, str]:
+    return {"Authorization": f"Bearer {hf_token}"} if hf_token else {}
+
+
+def _fetch_model_api(
+    slug: str, fetcher: HttpFetcher, hf_token: Optional[str]
+) -> tuple[Optional[dict], Optional[DeriverError]]:
+    url = f"{_HF_API}/{slug}?blobs=true"
+    resp = fetcher.get(url, headers=_auth_headers(hf_token))
+    if resp.status == 404:
+        return None, DeriverError(DeriverErrorKind.REPO_NOT_FOUND, slug)
+    if resp.status in (401, 403):
+        if not hf_token:
+            return None, DeriverError(DeriverErrorKind.GATED_NO_TOKEN, slug)
+        # token present but still denied → treat as not-found (no access)
+        return None, DeriverError(DeriverErrorKind.REPO_NOT_FOUND, f"{slug} (auth denied)")
+    if resp.status != 200:
+        return None, DeriverError(
+            DeriverErrorKind.REPO_NOT_FOUND, f"{slug} (HF API status {resp.status})"
+        )
+    try:
+        return json.loads(resp.body.decode("utf-8")), None
+    except (ValueError, UnicodeDecodeError) as exc:
+        return None, DeriverError(
+            DeriverErrorKind.REPO_NOT_FOUND, f"{slug} (malformed HF API: {exc})"
+        )
+
+
+def _fetch_config_json(
+    slug: str, fetcher: HttpFetcher, hf_token: Optional[str]
+) -> tuple[Optional[dict], Optional[DeriverError]]:
+    url = f"{_HF_RESOLVE}/{slug}/resolve/main/config.json"
+    resp = fetcher.get(url, headers=_auth_headers(hf_token))
+    if resp.status == 404:
+        return None, DeriverError(
+            DeriverErrorKind.UNSUPPORTED_FORMAT, f"{slug} (no config.json)"
+        )
+    if resp.status in (401, 403):
+        if not hf_token:
+            return None, DeriverError(DeriverErrorKind.GATED_NO_TOKEN, slug)
+        return None, DeriverError(DeriverErrorKind.REPO_NOT_FOUND, f"{slug} (auth denied)")
+    if resp.status != 200:
+        return None, DeriverError(
+            DeriverErrorKind.REPO_NOT_FOUND, f"{slug} (config.json status {resp.status})"
+        )
+    try:
+        return json.loads(resp.body.decode("utf-8")), None
+    except (ValueError, UnicodeDecodeError) as exc:
+        return None, DeriverError(
+            DeriverErrorKind.QUANT_DTYPE_UNKNOWN, f"{slug} (malformed config.json: {exc})"
+        )
+
+
+# ---------------------------------------------------------------------------
+# File selection
+# ---------------------------------------------------------------------------
+def _is_adapter(name: str) -> bool:
+    low = name.lower()
+    return any(p in low for p in _ADAPTER_PATTERNS)
+
+
+def _siblings(api: dict) -> list[dict]:
+    out = []
+    for s in api.get("siblings", []) or []:
+        if isinstance(s, dict) and s.get("rfilename"):
+            out.append(s)
+    return out
+
+
+def select_weight_files(
+    api: dict,
+) -> tuple[Optional[list[str]], Optional[DeriverError]]:
+    """Per brief file selection:
+
+      - `*.safetensors.index.json` present → the shard set in its weight_map.
+        (The index itself must be fetched separately to read weight_map; here
+        we only need the shard filenames the index points to, which equal the
+        set of top-level shard *.safetensors. We resolve the shard set from
+        the siblings list filtered to non-adapter *.safetensors.)
+      - Else → after excluding adapter/LoRA patterns, accept EXACTLY ONE
+        top-level *.safetensors regardless of basename; multiple plausible
+        complete sets → `ambiguous-weight-set`.
+      - No *.safetensors → `unsupported-format`.
+    """
+    sibs = _siblings(api)
+    names = [s["rfilename"] for s in sibs]
+
+    safet = [
+        n
+        for n in names
+        if n.endswith(".safetensors") and "/" not in n and not _is_adapter(n)
+    ]
+    if not safet:
+        return None, DeriverError(
+            DeriverErrorKind.UNSUPPORTED_FORMAT,
+            "no top-level *.safetensors (GGUF/.bin not supported until v0.8.1)",
+        )
+
+    index_files = [
+        n
+        for n in names
+        if n.endswith(".safetensors.index.json") and "/" not in n
+    ]
+    if index_files:
+        # Sharded set: the shards are the non-adapter top-level *.safetensors.
+        # A single complete sharded set is unambiguous; >1 distinct index
+        # implies >1 plausible complete set.
+        if len(index_files) > 1:
+            return None, DeriverError(
+                DeriverErrorKind.AMBIGUOUS_WEIGHT_SET,
+                f"multiple safetensors index files: {sorted(index_files)}",
+            )
+        shards = sorted(
+            n for n in safet if "-of-" in n or n.startswith("model-")
+        )
+        if not shards:
+            # Index present but no obvious shard naming — fall back to all
+            # non-adapter top-level safetensors as the set.
+            shards = sorted(safet)
+        return shards, None
+
+    # No index: must be exactly one complete set.
+    if len(safet) == 1:
+        return safet, None
+    # Multiple top-level safetensors with no index → ambiguous.
+    return None, DeriverError(
+        DeriverErrorKind.AMBIGUOUS_WEIGHT_SET,
+        f"{len(safet)} top-level *.safetensors and no index.json: {sorted(safet)}",
+    )
+
+
+def _sum_blob_gb(api: dict, selected: list[str]) -> float:
+    by_name = {}
+    for s in _siblings(api):
+        size = s.get("size")
+        if size is None and isinstance(s.get("lfs"), dict):
+            size = s["lfs"].get("size")
+        if size is not None:
+            by_name[s["rfilename"]] = size
+    total = 0
+    wanted = set(selected) | {"config.json"}
+    for name, size in by_name.items():
+        base = name
+        if name in wanted or (
+            name.endswith("config.json") and "/" not in name
+        ) or any(name == w for w in selected):
+            total += int(size)
+            continue
+        # tokenizer files (required) count toward footprint
+        if base in (
+            "tokenizer.json",
+            "tokenizer.model",
+            "tokenizer_config.json",
+            "special_tokens_map.json",
+            "vocab.json",
+            "merges.txt",
+        ):
+            total += int(size)
+    # weights authority is the summed selected blobs (config/tokenizer are
+    # negligible but included for footprint completeness).
+    return round(total / (1024 ** 3), 4)
+
+
+def _selected_weight_gb(api: dict, selected: list[str]) -> float:
+    by_name = {}
+    for s in _siblings(api):
+        size = s.get("size")
+        if size is None and isinstance(s.get("lfs"), dict):
+            size = s["lfs"].get("size")
+        if size is not None:
+            by_name[s["rfilename"]] = int(size)
+    total = sum(by_name.get(n, 0) for n in selected)
+    return round(total / (1024 ** 3), 4)
+
+
+# ---------------------------------------------------------------------------
+# Bounded safetensors-header probe (pre-download, range-bounded)
+# ---------------------------------------------------------------------------
+def probe_safetensors_dtype(
+    slug: str,
+    weight_file: str,
+    fetcher: HttpFetcher,
+    hf_token: Optional[str],
+) -> Optional[str]:
+    """Range-bounded header probe. NEVER downloads a full weight file.
+
+      1. Range-GET bytes=0-7 → little-endian u64 = header length N.
+      2. if N > 16 MiB → None (caller maps to quant-dtype-unknown).
+      3. Range-GET bytes=8-(8+N-1)  [HTTP ranges inclusive; read exactly N].
+      4. parse JSON; read __metadata__ / first tensor dtype.
+
+    Any failure/malformed → None.
+    """
+    url = f"{_HF_RESOLVE}/{slug}/resolve/main/{weight_file}"
+    try:
+        r1 = fetcher.get(url, headers=_auth_headers(hf_token), range_=(0, 7))
+    except NetworkError:
+        return None
+    if r1.status not in (200, 206) or len(r1.body) < 8:
+        return None
+    n = struct.unpack("<Q", r1.body[:8])[0]
+    if n <= 0 or n > _MAX_HEADER_BYTES:
+        return None
+    # bytes 8 .. 8+N-1 inclusive == exactly N bytes from offset 8.
+    try:
+        r2 = fetcher.get(
+            url, headers=_auth_headers(hf_token), range_=(8, 8 + n - 1)
+        )
+    except NetworkError:
+        return None
+    if r2.status not in (200, 206):
+        return None
+    blob = r2.body[:n]
+    if len(blob) < n:
+        return None
+    try:
+        hdr = json.loads(blob.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        return None
+    if not isinstance(hdr, dict):
+        return None
+    meta = hdr.get("__metadata__")
+    if isinstance(meta, dict):
+        for k in ("dtype", "torch_dtype", "format"):
+            if isinstance(meta.get(k), str):
+                return meta[k]
+    for key, tinfo in hdr.items():
+        if key == "__metadata__":
+            continue
+        if isinstance(tinfo, dict) and isinstance(tinfo.get("dtype"), str):
+            return tinfo["dtype"]
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Quant / dtype chain + effective bits-per-weight
+# ---------------------------------------------------------------------------
+_DTYPE_BPW = {
+    "BF16": 16.0,
+    "F16": 16.0,
+    "FP16": 16.0,
+    "FLOAT16": 16.0,
+    "BFLOAT16": 16.0,
+    "F32": 32.0,
+    "FP32": 32.0,
+    "FLOAT32": 32.0,
+    "F8_E5M2": 8.0,
+    "F8_E4M3": 8.0,
+    "FLOAT8_E5M2": 8.0,
+    "FLOAT8_E4M3FN": 8.0,
+    "I8": 8.0,
+    "INT8": 8.0,
+    "U8": 8.0,
+    "I4": 4.0,
+    "INT4": 4.0,
+}
+
+
+def _quant_bpw(quant_cfg: dict) -> Optional[float]:
+    bits = quant_cfg.get("bits") or quant_cfg.get("w_bit") or quant_cfg.get(
+        "weight_bits"
+    )
+    if isinstance(bits, (int, float)) and bits > 0:
+        return float(bits)
+    method = str(
+        quant_cfg.get("quant_method")
+        or quant_cfg.get("method")
+        or quant_cfg.get("quant_algo")
+        or ""
+    ).lower()
+    if any(k in method for k in ("awq", "gptq", "autoround", "int4", "4bit")):
+        return 4.0
+    if "fp8" in method or "8bit" in method or "int8" in method:
+        return 8.0
+    return None
+
+
+def resolve_quant_dtype(
+    slug: str,
+    config: dict,
+    selected: list[str],
+    fetcher: HttpFetcher,
+    hf_token: Optional[str],
+) -> tuple[Optional[str], Optional[float], Optional[DeriverError]]:
+    """`quantization_config` → `torch_dtype` → bounded header probe →
+    else `quant-dtype-unknown`. Returns (weight_format, bpw, error)."""
+    qcfg = config.get("quantization_config")
+    if isinstance(qcfg, dict) and qcfg:
+        method = str(
+            qcfg.get("quant_method") or qcfg.get("method") or "quantized"
+        ).lower()
+        bpw = _quant_bpw(qcfg)
+        if bpw is not None:
+            return method, bpw, None
+        # known method, undeterminable bits
+        return None, None, DeriverError(
+            DeriverErrorKind.QUANT_DTYPE_UNKNOWN,
+            f"{slug} (quantization_config method={method!r} bits undeterminable)",
+        )
+
+    td = config.get("torch_dtype") or config.get("dtype")
+    if isinstance(td, str) and td.strip():
+        bpw = _DTYPE_BPW.get(td.strip().upper())
+        if bpw is not None:
+            return td.strip(), bpw, None
+
+    # bounded header probe (sharded → first shard only)
+    if selected:
+        dtype = probe_safetensors_dtype(
+            slug, sorted(selected)[0], fetcher, hf_token
+        )
+        if dtype:
+            bpw = _DTYPE_BPW.get(dtype.strip().upper())
+            if bpw is not None:
+                return dtype.strip(), bpw, None
+
+    return None, None, DeriverError(
+        DeriverErrorKind.QUANT_DTYPE_UNKNOWN,
+        f"{slug} (no quantization_config / torch_dtype / probeable header dtype)",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Spec / profile assembly
+# ---------------------------------------------------------------------------
+def _int(config: dict, key: str) -> Optional[int]:
+    v = config.get(key)
+    return v if isinstance(v, int) and not isinstance(v, bool) else None
+
+
+def _build_generic_dense_spec(
+    slug: str, config: dict, weight_gb: float
+) -> dict[str, Any]:
+    hidden = _int(config, "hidden_size")
+    n_layers = _int(config, "num_hidden_layers")
+    n_heads = _int(config, "num_attention_heads")
+    n_kv = _int(config, "num_key_value_heads")
+    head_dim = _int(config, "head_dim")
+    if head_dim is None and hidden and n_heads and hidden % n_heads == 0:
+        head_dim = hidden // n_heads
+    arch_list = config.get("architectures") or []
+    arch = str(arch_list[0]) if arch_list else None
+    return {
+        "model_id": slug,
+        "model_family": "generic-dense",
+        "arch": arch,
+        "hidden_size": hidden,
+        "num_hidden_layers": n_layers,
+        "num_attn_heads": n_heads,
+        "num_kv_heads": n_kv,
+        "head_dim_attn": head_dim,
+        "weights_total_gb": weight_gb,
+        "valid_tp": [1, 2],
+        "max_ctx_supported": _int(config, "max_position_embeddings") or 131072,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Public entry point
+# ---------------------------------------------------------------------------
+def derive(
+    slug: str,
+    *,
+    hf_token: Optional[str] = None,
+    hf_home: Optional[str] = None,
+    fetcher: Optional[HttpFetcher] = None,
+    profiles=None,
+) -> DeriveResult:
+    """Derive a ModelProfile-shaped result for an HF repo slug.
+
+    Resolution order (§4):
+      1. Tier-1 curated lookup (slug ∈ a curated variant's hf_repos) →
+         confidence EXACT, no network for the spec (curated profile is
+         authoritative). Stratum-1 file/quant checks are NOT run for a
+         curated hit (the curated profile already encodes them); P3/P4 do
+         the Path-A weights_variant compat check.
+      2. else fetch config.json + HF siblings; run stratum-1 deriver checks;
+         if is_generic_dense_eligible → confidence ESTIMATED_LOWER_BOUND.
+      3. else → NOT_ELIGIBLE (P4 wires the stratum-5 abort; P2 only marks).
+    """
+    res = DeriveResult(slug=slug)
+    if fetcher is None:
+        fetcher = HttpFetcher()
+    if profiles is None:
+        from .compat import load_profiles
+
+        profiles = load_profiles()
+
+    hf_token = hf_token or os.environ.get("HF_TOKEN") or None
+
+    # --- §4 Tier-1 curated lookup ------------------------------------------
+    t1 = _tier1_lookup(slug, profiles)
+    if t1 is not None:
+        model = profiles.models[t1.model_id]
+        variant_meta = model.weights.get(t1.weights_variant, {})
+        # Schema invariant: hf_repos must only attach to safetensors-compatible
+        # variants. If a curated slug somehow resolves to a gguf / non-
+        # safetensors variant, surface stratum-1 unsupported-format honestly
+        # rather than a silent mismatch (Codex-r5 Med-3).
+        fmt = str(variant_meta.get("format", "")).lower()
+        if fmt in ("gguf",):
+            res.error = DeriverError(
+                DeriverErrorKind.UNSUPPORTED_FORMAT,
+                f"{slug} resolves to {t1.model_id}.{t1.weights_variant} "
+                f"(format={fmt!r}); GGUF not supported until v0.8.1",
+            )
+            return res
+        res.tier1 = t1
+        res.confidence = Confidence.EXACT
+        res.profile = {
+            "model_id": model.id,
+            "weights_variant": t1.weights_variant,
+            "arch": None,
+            "family": model.family,
+            "hidden_size": model.hidden_size,
+            "num_hidden_layers": model.num_hidden_layers,
+            "num_attn_heads": model.num_attn_heads,
+            "num_kv_heads": model.num_kv_heads,
+            "weight_format": variant_meta.get("format"),
+            "weights_variant_size_gb": variant_meta.get("size_gb"),
+        }
+        res.diagnostics["resolution"] = "tier1-curated"
+        return res
+
+    # --- stratum-1: HF model API first (repo existence / gating) -----------
+    # Order matters: the HF model API is the authority for repo-not-found
+    # (404) and gated-no-token (401/403 w/o token). config.json 404 on an
+    # existing repo means "no transformers config" -> unsupported-format.
+    try:
+        api, err = _fetch_model_api(slug, fetcher, hf_token)
+    except NetworkError as exc:
+        res.error = DeriverError(
+            DeriverErrorKind.REPO_NOT_FOUND, f"{slug} (network error: {exc})"
+        )
+        return res
+    if err is not None:
+        res.error = err
+        return res
+
+    try:
+        config, err = _fetch_config_json(slug, fetcher, hf_token)
+    except NetworkError as exc:
+        res.error = DeriverError(
+            DeriverErrorKind.REPO_NOT_FOUND, f"{slug} (network error: {exc})"
+        )
+        return res
+    if err is not None:
+        res.error = err
+        return res
+
+    selected, err = select_weight_files(api or {})
+    if err is not None:
+        res.error = err
+        return res
+
+    weight_format, bpw, err = resolve_quant_dtype(
+        slug, config or {}, selected or [], fetcher, hf_token
+    )
+    if err is not None:
+        res.error = err
+        return res
+
+    weight_gb = _selected_weight_gb(api or {}, selected or [])
+    footprint_gb = _sum_blob_gb(api or {}, selected or [])
+
+    # --- §4 generic-dense eligibility (reuse P1's predicate) ---------------
+    kv = _load_kv_calc()
+    eligible = bool(kv.is_generic_dense_eligible(config or {}))
+    res.generic_dense_eligible = eligible
+
+    arch_list = (config or {}).get("architectures") or []
+    arch = str(arch_list[0]) if arch_list else None
+    has_auto_map = bool((config or {}).get("auto_map"))
+
+    res.profile = {
+        "model_id": slug,
+        "weights_variant": None,
+        "arch": arch,
+        "family": "generic-dense" if eligible else None,
+        "auto_map": has_auto_map,
+        "weight_format": weight_format,
+        "effective_bpw": bpw,
+        "weights_total_gb": weight_gb,
+        "footprint_gb": footprint_gb,
+        "selected_weight_files": selected,
+        "config_hidden_size": _int(config or {}, "hidden_size"),
+        "config_num_hidden_layers": _int(config or {}, "num_hidden_layers"),
+        "config_num_attention_heads": _int(config or {}, "num_attention_heads"),
+        "config_num_key_value_heads": _int(config or {}, "num_key_value_heads"),
+    }
+    res.diagnostics["resolution"] = "derived"
+
+    if eligible:
+        res.confidence = Confidence.ESTIMATED_LOWER_BOUND
+        res.spec = _build_generic_dense_spec(slug, config or {}, weight_gb)
+    else:
+        res.confidence = Confidence.NOT_ELIGIBLE  # P4 wires stratum-5 abort
+
+    return res

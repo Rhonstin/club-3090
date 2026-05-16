@@ -199,6 +199,24 @@ class ModelProfile:
     # kv-calc gains MoE-aware activation/KV formulas.
     kv_calc_supported: bool = True
 
+    def hf_repos_for(self, variant: str) -> tuple[str, ...]:
+        """v0.8.0 Pull-Gate — full HF slugs that resolve to this model's
+        ``weights.<variant>``. Empty tuple when the variant declares none.
+
+        Surfaced from ``weights.<variant>.hf_repos`` (a variant-scoped, NOT
+        model-level, schema field — Codex-r5 Med-3). ``_model()`` normalizes
+        every variant to carry an ``hf_repos`` list so this never KeyErrors;
+        consumers that predate v0.8.0 are unaffected (they never read it)."""
+        meta = self.weights.get(variant) or {}
+        return tuple(meta.get("hf_repos", ()) or ())
+
+    def all_hf_repos(self) -> dict[str, tuple[str, ...]]:
+        """Map of weights_variant -> tuple of HF slugs for this model."""
+        return {
+            variant: tuple(meta.get("hf_repos", ()) or ())
+            for variant, meta in self.weights.items()
+        }
+
 
 @dataclass(frozen=True)
 class WorkloadProfile:
@@ -358,6 +376,26 @@ def _hardware(data: dict[str, Any]) -> HardwareProfile:
     )
 
 
+def _normalize_weights(raw: Any) -> dict[str, dict[str, Any]]:
+    """v0.8.0 Pull-Gate — preserve ``weights.<variant>.hf_repos`` (P2 owns
+    this schema edit). ``_dict()`` already kept nested variant keys by
+    reference; here we additionally guarantee every variant carries an
+    ``hf_repos`` list (default ``[]``) so ``ModelProfile.hf_repos_for`` and
+    the cross-ref invariants never have to special-case absence. Variant
+    sub-dicts are shallow-copied so the normalized default does not leak back
+    into the YAML-loaded cache. Additive: no existing key is altered."""
+    out: dict[str, dict[str, Any]] = {}
+    for variant, meta in dict(raw or {}).items():
+        meta = dict(meta or {})
+        repos = meta.get("hf_repos")
+        if repos is None:
+            meta["hf_repos"] = []
+        else:
+            meta["hf_repos"] = [str(r) for r in repos]
+        out[variant] = meta
+    return out
+
+
 def _model(data: dict[str, Any]) -> ModelProfile:
     return ModelProfile(
         schema_version=data["schema_version"],
@@ -393,7 +431,7 @@ def _model(data: dict[str, Any]) -> ModelProfile:
         vision_capable=data.get("vision_capable"),
         max_ctx_supported=int(data["max_ctx_supported"]),
         attention_k_eq_v=bool(data["attention_k_eq_v"]),
-        weights=_dict(data.get("weights")),
+        weights=_normalize_weights(data.get("weights")),
         default_weight_variant=data["default_weight_variant"],
         compatible_drafters=_tuple(data.get("compatible_drafters")),
         valid_tp=tuple(int(x) for x in _tuple(data.get("valid_tp"))),
@@ -480,6 +518,35 @@ def _validate_cross_refs(profiles: Profiles) -> None:
                     f"models/{model.id}.yml references unknown drafter `{drafter_id}`. "
                     f"Available drafters: {_known(profiles.drafters)}"
                 )
+
+    # v0.8.0 Pull-Gate schema invariants (Codex-r5 Med-3):
+    #   (1) every hf_repos slug is globally unique across all variants/models;
+    #   (2) hf_repos only attaches to safetensors-compatible variants — a
+    #       gguf / non-safetensors variant must carry none (the deriver
+    #       surfaces a slug→gguf collision as honest stratum-1
+    #       `unsupported-format`, never a silent mismatch).
+    _NON_SAFETENSORS_FORMATS = {"gguf"}
+    seen_slugs: dict[str, str] = {}
+    for model in profiles.models.values():
+        for variant, meta in model.weights.items():
+            repos = meta.get("hf_repos", []) or []
+            fmt = str(meta.get("format", "")).lower()
+            if repos and fmt in _NON_SAFETENSORS_FORMATS:
+                failures.append(
+                    f"models/{model.id}.yml weights.{variant}.hf_repos is set "
+                    f"but format={fmt!r} is not safetensors-compatible "
+                    f"(hf_repos must only attach to safetensors variants)"
+                )
+            for slug in repos:
+                key = str(slug).strip().lower()
+                where = f"{model.id}.weights.{variant}"
+                if key in seen_slugs:
+                    failures.append(
+                        f"hf_repos slug `{slug}` is not globally unique: "
+                        f"declared on both {seen_slugs[key]} and {where}"
+                    )
+                else:
+                    seen_slugs[key] = where
 
     for drafter in profiles.drafters.values():
         for model_id in drafter.model_compat:
