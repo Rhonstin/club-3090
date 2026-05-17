@@ -16,6 +16,67 @@ history; SemVer takes over from `v0.3.0` onward.
 
 ---
 
+## v0.8.0 — 2026-05-17
+
+
+### ⚠️ Cliffs, gotchas, regressions
+
+- v0.8.0 Pull-Gate P4-fix: price Tier-1 curated via curated-exact kv-calc spec, not generic-dense (+ non-mocked regression test) ([087a8ea](https://github.com/noonghunna/club-3090/commit/087a8ea6929144ca64b58d499161087111a290ab))
+
+
+### 🐛 Bug fixes
+
+- fix(verify-full): warm engine before scored checks (closes #352) ([c595496](https://github.com/noonghunna/club-3090/commit/c5954964c5ffa68a8997866296ec83aa349d9219))
+
+
+### 📝 Documentation
+
+- docs(tq3-mtp): add missing 04-gemma-vs-qwen.png chart ([da9ef5e](https://github.com/noonghunna/club-3090/commit/da9ef5eb108ed01aa436444e4708ba329e8e7662))
+- docs: UPSTREAM Gemma4 TurboQuant row — exact config.py:101 mechanism + fix-PR set ([fd8695f](https://github.com/noonghunna/club-3090/commit/fd8695f1ab64082be8818bd72a72ea2d3f710cca))
+- docs+hygiene: track Gemma4 native-TurboQuant upstream blocker; gitignore new MoE cache dirs ([f812715](https://github.com/noonghunna/club-3090/commit/f812715d3e8afce1f79969fb76e5ed600a337122))
+- docs(KERNEL_MATRIX): add Kernel Selection Philosophy section ([287c766](https://github.com/noonghunna/club-3090/commit/287c76617d5a3432f04425e876889ed6e43b7891))
+
+
+### 🧹 Other
+
+- Merge PR #147: v0.8.0 — Universal pull (evaluate & serve any safetensors HF model) ([#147](https://github.com/noonghunna/club-3090/pull/147) by @noonghunna)
+- v0.8.0 [docs] PULL.md Quickstart (command-first, top-of-doc) + ARCHITECTURE one-liner: stage names are internal, users run one command ([bef766d](https://github.com/noonghunna/club-3090/commit/bef766d4ae2c5a03958c5da3d79bfa6a92ab01dd))
+- v0.8.0 [review] pre-tag fixes: scrub internal-path leaks from shipped source + make .pull-captures-corpus tests CI-safe (skip-when-absent) ([49d9bb4](https://github.com/noonghunna/club-3090/commit/49d9bb4313a97d3cacd6cafdaebc5c2903fc4bfb))
+- v0.8.0 [docs] ARCHITECTURE.md: add the universal pull→gate→emit→loop pipeline to the mental model + scripts tree (current-state, was stale for v0.8.0) ([1cdda19](https://github.com/noonghunna/club-3090/commit/1cdda195a77558a5cdef166fb7d184538b773140))
+- v0.8.0 [UX] §7 two doc tracks: docs/PULL.md (user front-door) + docs/README.md (track spine) + README migration nudge ([a0b3b5c](https://github.com/noonghunna/club-3090/commit/a0b3b5c8b448a028f6037efeb610d4a53da18881))
+- v0.8.0 [F] F8-fix: widen §6.1 Tier-1 OOM signature + pt3.actual regexes to real vLLM v0.21.0+ KV-cache-too-large phrasing — on-rig F8 caught classic-torch-only regexes miss the common KV-prediction failure ([f92624d](https://github.com/noonghunna/club-3090/commit/f92624d9a78c18f5b92257a553abdf07e8071dcf))
+- v0.8.0 [F] F7: docs/LOOP.md contributor doc (Loop phase, grounded in shipped F1–F6) + CONTRACT-5(i) risk note ([a8b30d6](https://github.com/noonghunna/club-3090/commit/a8b30d67072fe13bad7810c7ef751fc45c369c2f))
+- v0.8.0 [F] F6: CONTRACT-5 mandatory content-hash kv_calc_version (G2) + G1 topo-verify + L2 fixture sync ([1ac0481](https://github.com/noonghunna/club-3090/commit/1ac048189d02ccf709942b1c066737f5d9c29e8e))
+- v0.8.0 [F] F5: §6.3 canonical-tuple-hash dedup + bounded label scheme + collision-safe submit path (CONTRACT-4) ([5de7224](https://github.com/noonghunna/club-3090/commit/5de7224a731bfefb70cda038cdd8bf3d0d48915d))
+- v0.8.0 [F] F4: §6.2 inbound-trust pipeline raw→candidate→validated→Tier-1 + CONTRACT-3a derived-deferral (CONTRACT-3) ([d758f08](https://github.com/noonghunna/club-3090/commit/d758f08fce86d81d80370ad037ce12e2edc54339))
+- v0.8.0 [F] F3: G6-A 3-part additive [E] touch (pt1.predicted_b_breakdown, pt3.failure_log_excerpt+actual, container-log capture) + §6.1 Tier-1 (CONTRACT-2) ([b100979](https://github.com/noonghunna/club-3090/commit/b1009793f26f38370ba2a013ed93d2b6044e0b59))
+- v0.8.0 [F] F2: §6.1 Tier-2 semantic-fingerprint classifier + Appendix A seed DB (CONTRACT-2 Tier-2) ([9f80d29](https://github.com/noonghunna/club-3090/commit/9f80d29fbe63cd9302221a7d182693b5f803ca82))
+- v0.8.0 [F] F1: FInput capture-bundle reader + schema-1 validation + key-normalization (CONTRACT-1) ([1491cbc](https://github.com/noonghunna/club-3090/commit/1491cbc7afaa48df924e2ea27446b7dc3b782c42))
+- v0.8.0 [E] E-outcome-fix: honest 3-state manifest outcome (partial-success != failed) — §6.2 partial is a capability-scoped success ([71148d6](https://github.com/noonghunna/club-3090/commit/71148d6054b4616ada57654b7c405cb0c0d50cc6))
+- v0.8.0 [E] E3/E4-fix: boot lifecycle as context manager (server stays up for smoke+capture, teardown on ctx-exit) — on-rig E5 caught teardown-in-finally-before-smoke ([f7c405a](https://github.com/noonghunna/club-3090/commit/f7c405a06d4c8c2ef349533d5d9e6ee59455a073))
+- v0.8.0 [E] E3-fix: smoke probes the real served-model-name (not literal "derived") + capture failure detail — on-rig E5 caught red-smoke-on-healthy-boot ([16a1e4d](https://github.com/noonghunna/club-3090/commit/16a1e4d944992682ac5c8db9b8f7482730e3b9e6))
+- v0.8.0 [E] E2-fix-2: verify *.safetensors against HF API lfs.sha256 (not Xet-redirect-fragile HEAD x-linked-etag) — on-rig E5 caught false no-etag ([3ae74bf](https://github.com/noonghunna/club-3090/commit/3ae74bfdcfc9ddc4378003c04180d934282b8482))
+- v0.8.0 [E] E2-fix: download via hf CLI subprocess (not huggingface_hub lib-import) — on-rig E5 caught ModuleNotFoundError ([806a298](https://github.com/noonghunna/club-3090/commit/806a2985226cd1c6ab9f726882e5a610ba2da69f))
+- v0.8.0 [E] E5(docs): docs/PULL_EMIT_DERIVED.md (+ private ledger/recon-checklist updates) ([d134d5a](https://github.com/noonghunna/club-3090/commit/d134d5a5fcc2b509e7e259430954c192d18bea44))
+- v0.8.0 [E] E4: post-[C1] derived-[E] orchestration + trigger semantics + override force-capture (pt5) ([2ed18aa](https://github.com/noonghunna/club-3090/commit/2ed18aad3fd1f648d4a143d91e9e86d97b785f08))
+- v0.8.0 [E] E3: derived boot (HF_HOME mount) + 4 §6 capture emitters + manifest + derived smoke floor ([f327887](https://github.com/noonghunna/club-3090/commit/f327887c3926b8c119afd1d4883f64f40e1b83a6))
+- v0.8.0 [E] E2: HF download stage (download_set allowlist + x-linked-etag SHA, no-etag fail-closed, atomic staging) ([7a2ec86](https://github.com/noonghunna/club-3090/commit/7a2ec8664052044677c1724cc46ea78a7cd2988e))
+- v0.8.0 [E] E1: generate_from_profile + derived-vllm template + EInput + CONTRACT-5 gate ([411c84f](https://github.com/noonghunna/club-3090/commit/411c84fd8ae692acd99824754b292f387ecf9486))
+- v0.8.0 Pull-Gate P5: docs/PULL_GATE.md (two-path model, 6-stratum taxonomy, §4.1 [C1], hardware-SM) ([2582438](https://github.com/noonghunna/club-3090/commit/2582438d0202b0082464cca0bbb1dbee46d2725c))
+- v0.8.0 Pull-Gate P4: stratum-5 + [C1] §4.1 total fn + stratum-6 [D] dry-run + pull orchestrator + exhaustive test-pull.sh ([adf7a3b](https://github.com/noonghunna/club-3090/commit/adf7a3bf13e424e96ffb510d318faaf016ebf975))
+- v0.8.0 Pull-Gate P3: stratum-2 precondition + [C0] engine-support/runtime/hardware gate + [C2a] disk ([4a1d385](https://github.com/noonghunna/club-3090/commit/4a1d3857f25de46c60ff8c0b7f566733f32a2a6f))
+- v0.8.0 Pull-Gate P2: transformers deriver + ModelProfile/confidence + variant-scoped hf_repos schema ([818b79c](https://github.com/noonghunna/club-3090/commit/818b79ccb523aca5034fefe4abddebf5c697dab2))
+- v0.8.0 Pull-Gate P1: kv-calc generic-dense family + eligibility predicate + raw_verdict adapter ([1bafcfe](https://github.com/noonghunna/club-3090/commit/1bafcfe4a008c8d4e89763d872a99618e3853112))
+- v0.8.0: doc generated composes are not relocatable (run with --project-directory) ([a2fc05e](https://github.com/noonghunna/club-3090/commit/a2fc05e1c873ff4a6a3bc97de7df1685b41e5006))
+- v0.8.0 STEP 5: COMPOSE_GENERATOR.md + PATCH_POLICY.md (#141 contributor contract) ([9546f99](https://github.com/noonghunna/club-3090/commit/9546f99303bfcd907618d7778cf36237c33b858e))
+- v0.8.0 STEP 3+4: compose generator + 5-triple golden-parity test (#141) ([6d7a043](https://github.com/noonghunna/club-3090/commit/6d7a043d907aedab88cc10c8b97bea75a2c4a81d))
+- v0.8.0 STEP 2: extract patch_attribution.py (sound body-only reaches(), test imports it) ([60f3983](https://github.com/noonghunna/club-3090/commit/60f39832834051a294deb445bfc62d5ca90d0486))
+- v0.8.0 Phase A-prime: enrich patch/profile data for #141 generator (compose_service_template, genesis_equipped, delivery metadata, drift_guards, drafter/model_slug/trc fold-ins) ([9f23736](https://github.com/noonghunna/club-3090/commit/9f23736f014dbbea74b56a4287836019d0315fb9))
+- Add v0.8 Phase A patch attribution data ([91a9622](https://github.com/noonghunna/club-3090/commit/91a9622619ba2b1360676a95e412f30d3e975d7c))
+
+
+
+[Pin: `git checkout v0.8.0`] · [Full diff](https://github.com/noonghunna/club-3090/compare/v0.7.4...v0.8.0)
 ## v0.7.4 — 2026-05-15
 
 
