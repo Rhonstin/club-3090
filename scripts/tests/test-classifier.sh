@@ -443,6 +443,86 @@ check(r.route_as_kv_calc_bug is False
       "F3 (4): a Tier-2 result carries NO Tier-1 telemetry (Tier-1 never "
       "ran) — F2 behaviour byte-unchanged")
 
+# ---------------------------------------------------------------------------
+# F8-fix — real modern vLLM v0.21.0+ KV-cache-too-large phrasing. The on-rig
+# F8 validator induced a GENUINE vLLM KV-cache-too-large failure: vLLM
+# nightly bf610c2f raises a CLEAN `ValueError` from
+# `_check_enough_kv_cache_memory` — NOT torch.cuda.OutOfMemoryError — so the
+# SHIPPED classic-torch-only Tier-1 OOM signature MISSED this real, common,
+# kv-calc-relevant failure (it fell through to Tier-2 -> `unknown`, Tier-1
+# never fired). These lines are copied VERBATIM from
+# /opt/ai/f8-real-vllm-oom.log (line 42 = gpu_worker available; lines
+# 74/97 = the ValueError). With the F8-fix the widened signature MUST fire
+# Tier-1 -> genuine-oom, and with the new pt3.actual parse + a
+# pt1.predicted_b_breakdown all three inputs are present -> route TRUE.
+F8_REAL_EXCERPT = (
+    "f8d-oom-vllm  | (EngineCore pid=81) INFO 05-17 05:13:55 "
+    "[gpu_worker.py:462] Available KV cache memory: 20.89 GiB\n"
+    "f8d-oom-vllm  | (EngineCore pid=81) ERROR 05-17 05:13:55 "
+    "[core.py:1159] ValueError: To serve at least one request with the "
+    "models's max seq len (2000000), (22.89 GiB KV cache is needed, which "
+    "is larger than the available KV cache memory (20.89 GiB). Based on "
+    "the available memory, the estimated maximum model length is 1825488."
+)
+# 22.89 GiB -> 23439 MiB ; 20.89 GiB -> 21391 MiB (what [E]'s parse emits;
+# the F8-fixed capture.py is what produces pt3.actual on a real bundle).
+f8 = write_f3_bundle("f3_f8_real",
+    pt1_extra={"predicted_b_breakdown": PRED},
+    pt3={"point": "boot", "ok": False, "seconds": 4.0,
+         "failure": "server did not become ready before timeout",
+         "failure_log_excerpt": F8_REAL_EXCERPT,
+         "actual": {"attempted_alloc_mib": 23439,
+                    "gpu_worker_reported_mib": 21391}})
+r = classify(f8)
+check(r.failure_class is FailureClass.GENUINE_OOM
+      and r.tier is Tier.TIER1,
+      f"F8-fix: real vLLM v0.21.0+ 'KV cache is needed, which is larger "
+      f"than the available KV cache memory' ValueError -> genuine-oom via "
+      f"Tier-1 (got {r.failure_class.value}/{r.tier.value})")
+check(r.matched_rule == "tier1-oom-fastpath",
+      "F8-fix: real vLLM KV-OOM stamps the Tier-1 fast-path rule")
+check(r.route_as_kv_calc_bug is True,
+      "F8-fix: real vLLM KV-OOM + all-3 inputs present -> "
+      "route_as_kv_calc_bug=True (the kv-calc-bug signal this fix unblocks)")
+check(r.predicted_vs_actual_delta_mib == 21391 - int(round(22.5 * 1024)),
+      f"F8-fix: sane non-None predicted-vs-actual delta = gpu_worker "
+      f"available (21391) - sum([B]) (got "
+      f"{r.predicted_vs_actual_delta_mib})")
+check((r.tier1_inputs or {}).get("source") == "pt3+pt1",
+      "F8-fix: inputs resolved from the pt3+pt1 triple")
+
+# F8-fix: the older vLLM "No available memory for the cache blocks"
+# phrasing must ALSO fire Tier-1 genuine-oom (defensive coverage).
+r = classify(fi("f8_cacheblocks", pt3=boot_fail(
+    failure="ValueError: No available memory for the cache blocks. Try "
+            "increasing `gpu_memory_utilization` when initializing the "
+            "engine.")))
+check(r.failure_class is FailureClass.GENUINE_OOM
+      and r.tier is Tier.TIER1,
+      f"F8-fix: 'No available memory for the cache blocks' -> genuine-oom "
+      f"via Tier-1 (got {r.failure_class.value}/{r.tier.value})")
+
+# F8-fix CLASSIC NO-REGRESSION: the shipped classic
+# torch.cuda.OutOfMemoryError / 'Tried to allocate' / 'peak memory' path
+# STILL classifies genuine-oom via Tier-1 (the widening is purely
+# additive — the classic alternative is FIRST in the signature regex).
+r = classify(fi("f8_classic_noregress", pt3=boot_fail(
+    failure="torch.cuda.OutOfMemoryError: CUDA out of memory. Tried to "
+            "allocate 2.50 GiB")))
+check(r.failure_class is FailureClass.GENUINE_OOM
+      and r.tier is Tier.TIER1,
+      "F8-fix NO-REGRESSION: classic torch.cuda.OutOfMemoryError STILL "
+      "classifies genuine-oom via Tier-1 (widening is additive)")
+
+# F8-fix honest-degrade preserved: a NON-OOM novel error still falls
+# through to unknown (the widened signature does NOT over-match).
+r = classify(fi("f8_nonoom", pt3=boot_fail(
+    failure="RuntimeError: some entirely unrelated novel startup error")))
+check(r.failure_class is FailureClass.UNKNOWN
+      and r.route_as_kv_calc_bug is False,
+      "F8-fix: a non-OOM novel error STILL -> unknown / kvbug False "
+      "(widened signature does not over-match; honest-degrade preserved)")
+
 # Sweep every Appendix-A fixture: output ALWAYS ∈ the 6-enum; the kv-calc
 # routing gate stays False for EVERY Appendix-A seed (the OOM rows a1/a2
 # have NO Tier-1 inputs -> honest degrade; the rest are Tier-2). Only the

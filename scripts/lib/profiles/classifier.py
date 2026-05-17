@@ -367,12 +367,36 @@ def _match_condition(rule: dict, finput: FInput,
 # ---------------------------------------------------------------------------
 
 # The definitive OOM signature. `torch.cuda.OutOfMemoryError` is the
-# weight/KV-allocation OOM vLLM/torch raises; tolerate the common phrasings.
+# CLASSIC weight/KV-allocation OOM vLLM/torch raises; tolerate the common
+# phrasings.
+#
+# F8-fix: the on-rig F8 validator proved the CLASSIC-only signature MISSES
+# the very common modern vLLM v0.21.0+ kv-calc-relevant failure: vLLM
+# nightly (bf610c2f) raises a CLEAN `ValueError` from
+# `_check_enough_kv_cache_memory` — NOT `torch.cuda.OutOfMemoryError` —
+# whenever the requested max_model_len's KV cache exceeds the measured-
+# available KV memory (see `/opt/ai/f8-real-vllm-oom.log` line 74/97):
+#
+#   ValueError: To serve at least one request with the models's max seq len
+#   (2000000), (22.89 GiB KV cache is needed, which is larger than the
+#   available KV cache memory (20.89 GiB). ...
+#
+# plus the historically-seen older vLLM phrasing
+# "No available memory for the cache blocks". Both are a GENUINE OOM (the
+# request cannot be served on the available memory) and are exactly the
+# kv-calc-bug-relevant class Tier-1 must route. Widen the signature
+# ADDITIVELY (the classic torch path is the FIRST alternative — never
+# regressed; the new alternatives only ADD coverage).
 _RE_OOM_SIGNATURE = re.compile(
     r"torch\.cuda\.outofmemoryerror"
     r"|cuda out of memory"
     r"|cuda error: out of memory"
-    r"|outofmemoryerror: cuda",
+    r"|outofmemoryerror: cuda"
+    # F8-fix: real modern vLLM v0.21.0+ KV-cache-too-large ValueError.
+    r"|kv cache is needed, which is larger than the available kv cache"
+    r" memory"
+    # F8-fix: older vLLM "no KV blocks fit" phrasing (defensive).
+    r"|no available memory for the cache blocks",
     re.IGNORECASE,
 )
 
@@ -463,16 +487,36 @@ def _tier1_oom_fastpath(
     bare string. The NUMBERS are read from the structured `pt3.actual` /
     `pt1.predicted_b_breakdown` / `pt5` fields (`_resolve_tier1_inputs`) —
     classifier.py never parses raw logs (CONTRACT-1).
+
+    F8-fix: the OOM-SIGNATURE DETECTION scans the FULL (lowercased)
+    pt3.failure_log_excerpt / pt3.failure / pt5.exit_error_summary — NOT
+    the 240-char-capped `error_substring`. The on-rig F8 validator proved
+    real modern vLLM v0.21.0+ emits ~110 chars of `gpu_worker.py` +
+    `EngineCore`/`ValueError:` log prefix BEFORE the diagnostic phrase
+    `KV cache is needed, which is larger than the available KV cache
+    memory`, so that phrase falls PAST the `_ERROR_SUBSTRING_CAP`
+    truncation and the (even widened) signature regex would never see it
+    when scanned against `error_substring`. `error_substring` itself
+    (the fingerprint + telemetry value) stays 240-capped and BYTE-
+    UNCHANGED; only the Tier-1 signature *detection surface* is widened
+    to the full excerpt. Tier-2 is byte-unaffected (it still keys on the
+    capped `error_substring`).
     """
     pt3 = finput.pt3_boot or {}
     pt5 = finput.pt5_override
 
-    # OOM-signature surface (A-iii): the excerpt-derived error_substring
-    # (F1/F2 precedence already prefers pt3.failure_log_excerpt, then the
-    # bare pt3.failure); plus the pt5 exit summary when present.
-    sig_text = error_substring or ""
+    # OOM-signature DETECTION surface (A-iii precedence + F8-fix): the FULL
+    # untruncated excerpt text. Precedence mirrors `_extract_error_substring`
+    # (pt3.failure_log_excerpt > pt3.failure) PLUS the pt5 exit summary.
+    # Lowercased only (the signature regex is case-insensitive anyway; this
+    # keeps it cheap + deterministic). The capped `error_substring` is still
+    # ALSO scanned so any future signal that lands within 240 chars (and
+    # nowhere else) is not lost — union of both surfaces, never narrower.
+    full_excerpt = pt3.get("failure_log_excerpt") or pt3.get("failure") or ""
+    sig_parts = [error_substring or "", str(full_excerpt).lower()]
     if isinstance(pt5, dict) and pt5.get("exit_error_summary"):
-        sig_text = f"{sig_text} {str(pt5['exit_error_summary']).lower()}"
+        sig_parts.append(str(pt5["exit_error_summary"]).lower())
+    sig_text = " ".join(p for p in sig_parts if p)
     if not _RE_OOM_SIGNATURE.search(sig_text):
         return None  # not the OOM fast-path -> fall through to Tier-2.
 

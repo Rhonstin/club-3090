@@ -618,6 +618,119 @@ with tempfile.TemporaryDirectory() as td:
           f"F3 A-ii′ honest-degrade: no excerpt -> actual all-None, never "
           f"fabricated (got {pt3_n.get('actual')!r})")
 
+    # ── F8-fix: real modern vLLM v0.21.0+ KV-cache-too-large phrasing ──
+    # The on-rig F8 validator induced a GENUINE vLLM KV-cache-too-large
+    # failure. vLLM nightly bf610c2f (v0.21.0+ memory-profiler regime)
+    # raises a CLEAN ValueError from _check_enough_kv_cache_memory — NOT
+    # torch.cuda.OutOfMemoryError — so the CLASSIC "Tried to allocate" /
+    # "peak memory" regexes match NEITHER line and the real common failure
+    # was silently parsed {None,None} (Tier-1 never routed). These lines
+    # are copied VERBATIM from /opt/ai/f8-real-vllm-oom.log (line 42 = the
+    # gpu_worker available line; lines 74/97 = the ValueError signature).
+    F8_REAL_OOM_LOG = (
+        "f8d-oom-vllm  | (EngineCore pid=81) INFO 05-17 05:13:55 "
+        "[gpu_worker.py:462] Available KV cache memory: 20.89 GiB\n"
+        "f8d-oom-vllm  | (EngineCore pid=81) ERROR 05-17 05:13:55 "
+        "[core.py:1159] ValueError: To serve at least one request with the "
+        "models's max seq len (2000000), (22.89 GiB KV cache is needed, "
+        "which is larger than the available KV cache memory (20.89 GiB). "
+        "Based on the available memory, the estimated maximum model length "
+        "is 1825488. Try increasing `gpu_memory_utilization` or decreasing "
+        "`max_model_len` when initializing the engine.\n"
+    )
+    # 22.89 GiB -> round(22.89*1024) = 23439 MiB ; 20.89 GiB ->
+    # round(20.89*1024) = 21391 MiB. Allow ±2 MiB for GiB->MiB rounding.
+    _F8_TOL = 2
+    out_f8 = C.emit_capture(
+        ei, confidence=SimpleNamespace(name="EXACT"),
+        raw_verdict="wont-fit", profile_like="vllm/x",
+        download_result=dl, boot_result=res_boot_fail, smoke_result=sm,
+        compose_meta=compose_meta, kv_calc_version="kvcalc-v7",
+        repo_root=Path(td), ts="20260517T154500Z",
+        predicted_b_breakdown=PRED_BREAKDOWN,
+        failure_log_excerpt=F8_REAL_OOM_LOG,
+    )
+    pt3_f8 = json.loads(Path(out_f8["paths"]["boot"]).read_text())
+    _aa = pt3_f8["actual"]["attempted_alloc_mib"]
+    _gw = pt3_f8["actual"]["gpu_worker_reported_mib"]
+    check(_aa is not None and abs(_aa - 23439) <= _F8_TOL,
+          f"F8-fix: real vLLM '(22.89 GiB KV cache is needed' -> "
+          f"attempted_alloc_mib ~= 23439 (got {_aa})")
+    check(_gw is not None and abs(_gw - 21391) <= _F8_TOL,
+          f"F8-fix: real vLLM gpu_worker 'Available KV cache memory: "
+          f"20.89 GiB' -> gpu_worker_reported_mib ~= 21391 (got {_gw})")
+
+    # F8-fix: the gpu_worker.py explicit line is PREFERRED, but the
+    # ValueError parenthetical "available KV cache memory (20.89 GiB)"
+    # alone must ALSO populate gpu_worker_reported_mib (the fallback path).
+    F8_VALUEERROR_ONLY = (
+        "f8d-oom-vllm  | (EngineCore pid=81) ERROR 05-17 05:13:55 "
+        "[core.py:1159] ValueError: To serve at least one request with the "
+        "models's max seq len (2000000), (22.89 GiB KV cache is needed, "
+        "which is larger than the available KV cache memory (20.89 GiB).\n"
+    )
+    out_f8b = C.emit_capture(
+        ei, confidence=SimpleNamespace(name="EXACT"),
+        raw_verdict="wont-fit", profile_like="vllm/x",
+        download_result=dl, boot_result=res_boot_fail, smoke_result=sm,
+        compose_meta=compose_meta, kv_calc_version="kvcalc-v7",
+        repo_root=Path(td), ts="20260517T154600Z",
+        predicted_b_breakdown=PRED_BREAKDOWN,
+        failure_log_excerpt=F8_VALUEERROR_ONLY,
+    )
+    pt3_f8b = json.loads(Path(out_f8b["paths"]["boot"]).read_text())
+    _aa2 = pt3_f8b["actual"]["attempted_alloc_mib"]
+    _gw2 = pt3_f8b["actual"]["gpu_worker_reported_mib"]
+    check(_aa2 is not None and abs(_aa2 - 23439) <= _F8_TOL,
+          f"F8-fix: ValueError-only excerpt -> attempted ~= 23439 "
+          f"(got {_aa2})")
+    check(_gw2 is not None and abs(_gw2 - 21391) <= _F8_TOL,
+          f"F8-fix: ValueError parenthetical fallback -> "
+          f"gpu_worker_reported_mib ~= 21391 (got {_gw2})")
+
+    # F8-fix CLASSIC NO-REGRESSION: an excerpt with the CLASSIC
+    # torch.cuda.OutOfMemoryError "Tried to allocate 2.50 GiB" + a classic
+    # "peak memory ... 22880 MiB" line STILL parses BOTH fields exactly as
+    # before (the new vLLM-KV regexes must never shadow the classic path).
+    CLASSIC_OOM_LOG = (
+        "vllm-derived-1  | INFO gpu_worker.py:184 peak memory: "
+        "22880 MiB after profiling\n"
+        "vllm-derived-1  | torch.cuda.OutOfMemoryError: CUDA out of "
+        "memory. Tried to allocate 2.50 GiB (GPU 0; 24.00 GiB total)\n"
+    )
+    out_cl = C.emit_capture(
+        ei, confidence=SimpleNamespace(name="EXACT"),
+        raw_verdict="wont-fit", profile_like="vllm/x",
+        download_result=dl, boot_result=res_boot_fail, smoke_result=sm,
+        compose_meta=compose_meta, kv_calc_version="kvcalc-v7",
+        repo_root=Path(td), ts="20260517T154700Z",
+        predicted_b_breakdown=PRED_BREAKDOWN,
+        failure_log_excerpt=CLASSIC_OOM_LOG,
+    )
+    pt3_cl = json.loads(Path(out_cl["paths"]["boot"]).read_text())
+    check(pt3_cl["actual"]["attempted_alloc_mib"] == 2560
+          and pt3_cl["actual"]["gpu_worker_reported_mib"] == 22880,
+          f"F8-fix NO-REGRESSION: classic torch OOM 'Tried to allocate "
+          f"2.50 GiB' (2560) + 'peak memory 22880 MiB' STILL both parse "
+          f"(got {pt3_cl['actual']!r})")
+
+    # F8-fix honest-degrade preserved: a non-OOM excerpt with NEITHER
+    # phrasing -> actual all-None (never fabricated).
+    out_hd = C.emit_capture(
+        ei, confidence=SimpleNamespace(name="EXACT"),
+        raw_verdict="wont-fit", profile_like="vllm/x",
+        download_result=dl, boot_result=res_boot_fail, smoke_result=sm,
+        compose_meta=compose_meta, kv_calc_version="kvcalc-v7",
+        repo_root=Path(td), ts="20260517T154800Z",
+        predicted_b_breakdown=PRED_BREAKDOWN,
+        failure_log_excerpt="some unrelated boot error, no oom at all\n",
+    )
+    pt3_hd = json.loads(Path(out_hd["paths"]["boot"]).read_text())
+    check(pt3_hd["actual"] == {"attempted_alloc_mib": None,
+                               "gpu_worker_reported_mib": None},
+          f"F8-fix: non-OOM excerpt -> actual all-None honest-degrade "
+          f"preserved (got {pt3_hd['actual']!r})")
+
     # The booter stashes failure_log_excerpt on the BootResult; emit_capture
     # picks it up WITHOUT an explicit param (the pull.py pass-through path).
     res_with_log = B.BootResult(

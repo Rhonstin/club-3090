@@ -397,6 +397,7 @@ _ALLOC_UNIT_TO_MIB = {
 }
 
 # "Tried to allocate 512.00 MiB" / "Tried to allocate 2.50 GiB" etc.
+# (the CLASSIC torch.cuda.OutOfMemoryError traceback phrasing).
 _RE_ATTEMPTED_ALLOC = re.compile(
     r"tried to allocate\s+([0-9]+(?:\.[0-9]+)?)\s*(B|KiB|KB|MiB|MB|GiB|GB)",
     re.IGNORECASE,
@@ -409,6 +410,57 @@ _RE_GPU_WORKER_PEAK = re.compile(
     r"(?:gpu[_ ]?worker|peak memory|memory peak|maximum memory|"
     r"peak gpu memory|max memory)[^0-9\n]*?"
     r"([0-9]+(?:\.[0-9]+)?)\s*(MiB|MB|GiB|GB)",
+    re.IGNORECASE,
+)
+
+# ── F8-fix: real modern vLLM v0.21.0+ KV-cache-too-large phrasing ──────────
+# The on-rig F8 validator induced a GENUINE vLLM KV-cache-too-large failure;
+# the captured nightly (bf610c2f / v0.20.2rc1.dev371, the v0.21.0+ memory-
+# profiler regime) does NOT raise `torch.cuda.OutOfMemoryError` for this very
+# common kv-calc-relevant case. It raises a CLEAN `ValueError` from
+# `_check_enough_kv_cache_memory` with this VERBATIM shape (see
+# `/opt/ai/f8-real-vllm-oom.log` lines 42 + 74/97):
+#
+#   ValueError: To serve at least one request with the models's max seq len
+#   (2000000), (22.89 GiB KV cache is needed, which is larger than the
+#   available KV cache memory (20.89 GiB). ...
+#   INFO ... [gpu_worker.py:462] Available KV cache memory: 20.89 GiB
+#
+# The CLASSIC `_RE_ATTEMPTED_ALLOC` ("tried to allocate") + `_RE_GPU_WORKER_
+# PEAK` ("peak memory") regexes match NEITHER line, so this real, common
+# failure was silently parsed `{None, None}` and Tier-1 never routed.
+#
+# These NEW sibling regexes are tried AFTER the classic ones (first match
+# wins; classic torch OOM is never regressed). Mapping (F8-fix spec):
+#   attempted_alloc_mib  <- the "(N GiB|MiB) KV cache is needed" figure
+#                           (the FIRST number in the ValueError; the KV the
+#                           engine actually needed -> 22.89 GiB).
+#   gpu_worker_reported_mib <- the standalone gpu_worker.py line
+#                           "Available KV cache memory: N GiB" (preferred),
+#                           ELSE the ValueError parenthetical
+#                           "available KV cache memory (N GiB)" (the SECOND
+#                           number -> 20.89 GiB). Both are the SAME measured-
+#                           available figure; prefer the explicit gpu_worker
+#                           line when present.
+#
+# "<N> GiB KV cache is needed" — the engine-needed KV size (attempted side).
+_RE_KV_NEEDED = re.compile(
+    r"([0-9]+(?:\.[0-9]+)?)\s*(B|KiB|KB|MiB|MB|GiB|GB)\s+kv cache is needed",
+    re.IGNORECASE,
+)
+# The explicit gpu_worker.py measured-available line (PREFERRED source for
+# gpu_worker_reported_mib): "[gpu_worker.py:462] Available KV cache memory:
+# 20.89 GiB".
+_RE_KV_AVAILABLE_GPU_WORKER = re.compile(
+    r"gpu_worker[^\n]*?available kv cache memory[:\s]+"
+    r"([0-9]+(?:\.[0-9]+)?)\s*(B|KiB|KB|MiB|MB|GiB|GB)",
+    re.IGNORECASE,
+)
+# Fallback: the available figure inside the ValueError parenthetical —
+# "available KV cache memory (20.89 GiB)".
+_RE_KV_AVAILABLE_VALUEERROR = re.compile(
+    r"available kv cache memory\s*\(\s*"
+    r"([0-9]+(?:\.[0-9]+)?)\s*(B|KiB|KB|MiB|MB|GiB|GB)\s*\)",
     re.IGNORECASE,
 )
 
@@ -434,12 +486,32 @@ def _parse_pt3_actual(excerpt: Optional[str]) -> dict:
     attempted: Optional[int] = None
     gpu_worker: Optional[int] = None
     if excerpt:
+        # --- attempted_alloc_mib: classic torch OOM FIRST, then the real
+        #     modern vLLM v0.21.0+ "<N> GiB KV cache is needed" phrasing
+        #     (first match wins; classic path never regressed). ----------
         m = _RE_ATTEMPTED_ALLOC.search(excerpt)
         if m:
             attempted = _to_mib(m.group(1), m.group(2))
+        else:
+            mk = _RE_KV_NEEDED.search(excerpt)
+            if mk:
+                attempted = _to_mib(mk.group(1), mk.group(2))
+
+        # --- gpu_worker_reported_mib: classic "peak memory" FIRST; else
+        #     the explicit gpu_worker.py "Available KV cache memory: N GiB"
+        #     line (PREFERRED), else the ValueError's parenthetical
+        #     "available KV cache memory (N GiB)" fallback. ---------------
         g = _RE_GPU_WORKER_PEAK.search(excerpt)
         if g:
             gpu_worker = _to_mib(g.group(1), g.group(2))
+        else:
+            ga = _RE_KV_AVAILABLE_GPU_WORKER.search(excerpt)
+            if ga:
+                gpu_worker = _to_mib(ga.group(1), ga.group(2))
+            else:
+                gv = _RE_KV_AVAILABLE_VALUEERROR.search(excerpt)
+                if gv:
+                    gpu_worker = _to_mib(gv.group(1), gv.group(2))
     return {
         "attempted_alloc_mib": attempted,
         "gpu_worker_reported_mib": gpu_worker,
