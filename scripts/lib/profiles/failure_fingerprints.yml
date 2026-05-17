@@ -1,0 +1,177 @@
+# failure_fingerprints.yml — v0.8.0 [F] STEP F2 seed DB (CONTRACT-2 Tier-2).
+#
+# The §6.1 Tier-2 semantic-fingerprint DB. Design §6.1 (verbatim,
+# /opt/ai/docs/v0.8.x-design.md): ambiguous errors ->
+# `fingerprint = sha256(error_substring + arch_family + engine_version)` ->
+# YAML `(fingerprint -> class)` DB. Classes are the §6.1 enum VERBATIM, no
+# additions:
+#     genuine-oom | overlay-arch-drift | kernel-unsupported |
+#     quant-unsupported | benign-cold-start | unknown
+#
+# TWO sections, by design:
+#
+#   `exact_fingerprints:` — the hash-keyed exact-match table. Key =
+#       sha256(error_substring + arch_family + engine_version)[:12]
+#       (the same [:12] truncation `[F]`/F1 `dedup_hash` uses, for
+#       consistency). SEEDED EMPTY: real fingerprints depend on the live
+#       error text of THIS rig's runs (the arch_family + engine_version
+#       salt makes them rig/pin-specific), which we do not have on disk
+#       for every Appendix-A row at F2 time. This table is **grown via
+#       maintainer-classified submissions**: when a maintainer
+#       reclassifies an `unknown` (or corrects a mislabel), the resolved
+#       `(fingerprint -> class)` is appended here so the next identical
+#       run is an exact O(1) hit. A misclassification cannot silently
+#       merge with a real OOM because `failure_class` is in the §6.3
+#       dedup key (F1 `dedup_tuple`/`dedup_hash`).
+#
+#   `condition_matchers:` — the Appendix-A binding seed corpus. Robust
+#       substring / structural-condition matchers over the redacted,
+#       length-bounded error signal (priority pt3.failure_log_excerpt ->
+#       pt3.failure -> pt4 results_detail) + structural pt3/pt4 state.
+#       Ordered: FIRST matching rule wins. This is what classifies TODAY
+#       (the exact table grows over time on top of it). Anything matched
+#       by NO rule -> `unknown` -> maintainer review queue; an `unknown`
+#       NEVER auto-files a kv-calc bug (§6.1 acceptance).
+#
+# Appendix-A binding seed corpus (the F2 prompt restates it verbatim; this
+# file implements every row). `[E]` bug #2 (x-linked-etag) and bug #4
+# (teardown-race) are deliberately EXCLUDED — harness/download issues, not
+# model-boot failure classes.
+
+schema: 1
+
+# Hash-keyed exact-match table. Seeded EMPTY by design (see header). Grown
+# only by maintainer-classified submissions. Each future entry:
+#   <sha256(error_substring+arch_family+engine_version)[:12]>: <§6.1 class>
+exact_fingerprints: {}
+
+# Appendix-A condition matchers (the binding seed). FIRST match wins.
+#   kind:
+#     log_substring       — case-insensitive substring in error_substring
+#                            (the normalized redacted slice).
+#     log_substring_all   — ALL listed substrings present in error_substring.
+#     pt4_results          — structural: a smoke capability has `value` while
+#                            boot is green (the #145 parser/capability class).
+#     structural           — a named structural predicate (cold-start /
+#                            results_detail HTTP status).
+#   class: one of the §6.1 6 verbatim. NO 7th value may appear here.
+condition_matchers:
+  # Appendix A row 7: first-request-after-boot cold start (slow, then
+  # green). pt3 timeout but server later healthy / pt4 green.
+  # SUPPRESSED — never filed (§6.1 acceptance). Ordered FIRST so a
+  # later-green cold start is never misread as a genuine boot OOM.
+  - id: cold-start-then-green
+    kind: structural
+    predicate: pt3_timeout_but_pt4_green
+    class: benign-cold-start
+    note: >-
+      Appendix A: pt3 reports a boot timeout/not-ready but pt4 smoked
+      green (server became healthy after a slow first request).
+      Suppressed, never filed (§6.1 acceptance).
+
+  # Appendix A row 8: [E] on-rig bug #1 served-model-name 404 (now fixed).
+  # Historical negative-control fingerprint; in-enum benign-cold-start.
+  - id: served-model-name-404-negative-control
+    kind: structural
+    predicate: results_detail_http_404
+    class: benign-cold-start
+    note: >-
+      Appendix A historical negative control: [E] bug #1 served-model-name
+      404 in pt4.results_detail (now fixed). In-enum benign-cold-start so a
+      replay of this corpus row never files. Suppressed, never filed.
+
+  # Appendix A row 3: #145 qwen3_coder streaming dead — boot + plain-chat
+  # green, streaming red. Maps via pt4 (NOT a pt3 boot failure). A
+  # parser/capability class -> quant-unsupported.
+  - id: streaming-dead-boot-green-145
+    kind: pt4_results
+    capability: streaming
+    value: red
+    require_boot_green: true
+    class: quant-unsupported
+    note: >-
+      Appendix A #145: boot+plain-chat green but streaming red — parser/
+      capability class, maps via pt4 not a boot failure.
+
+  # Appendix A row 4: AWQ/quant mis-load on derived (no --quantization).
+  # Weight-load dtype error in pt3.failure_log_excerpt. The CONTRACT-5 /
+  # [E] AutoRound-reject rationale.
+  - id: quant-weightload-dtype
+    kind: log_substring
+    any:
+      - "does not support the dtype"
+      - "weight is not supported"
+      - "unsupported weight"
+      - "quantization config"
+      - "awq"
+      - "gptq"
+      - "autoround"
+      - "weight_loader"
+      - "incompatible quantization"
+    class: quant-unsupported
+    note: >-
+      Appendix A: weight-load / quantization dtype error on a derived
+      model loaded without --quantization.
+
+  # Appendix A row 5: Genesis-required engine on a clean image (overlay
+  # drift). Missing-symbol / patch-absent in pt3.failure_log_excerpt.
+  # engine_pin discriminates (it salts the fingerprint).
+  - id: overlay-arch-drift-missing-symbol
+    kind: log_substring
+    any:
+      - "no module named"
+      - "cannot import name"
+      - "attributeerror"
+      - "has no attribute"
+      - "undefined symbol"
+      - "missing-symbol"
+      - "patch not applied"
+      - "genesis"
+      - "monkeypatch"
+    class: overlay-arch-drift
+    note: >-
+      Appendix A: Genesis-required engine on a clean (non-overlay) image —
+      missing symbol / patch-absent. engine_pin discriminates.
+
+  # Appendix A row 6: Ampere-unsupported kernel (e.g. FA3 / SM90-only
+  # path). Kernel/arch assert in pt3.failure_log_excerpt. sm86 hw class.
+  - id: kernel-unsupported-sm
+    kind: log_substring
+    any:
+      - "sm90"
+      - "sm_90"
+      - "compute capability"
+      - "requires hopper"
+      - "flashattention-3"
+      - "fa3"
+      - "no kernel image is available"
+      - "not supported on this gpu"
+      - "kernel does not support"
+      - "unsupported architecture"
+    class: kernel-unsupported
+    note: >-
+      Appendix A: Ampere(sm86)-unsupported kernel — FA3 / SM90-only path /
+      kernel-or-arch assert.
+
+  # Appendix A rows 1 & 2: genuine OOM. Cliff-2 accumulated-ctx OOM
+  # (~21-26K) AND prefill-cliff OOM (~50-60K, DeltaNet GDN forward). Both
+  # surface `torch.cuda.OutOfMemoryError` in pt3.failure_log_excerpt.
+  # Tier-1 fast-path eligible — BUT Tier-1 is F3. In F2 this classifies
+  # genuine-oom and is FILED, but NEVER routed as a kv-calc bug
+  # (route_as_kv_calc_bug is hard-False in F2; F3's Tier-1 owns that gate
+  # and only when all three Tier-1 inputs are present). Ordered LAST among
+  # log matchers so the more specific quant/overlay/kernel rules win when
+  # an error names both.
+  - id: genuine-oom-cuda
+    kind: log_substring
+    any:
+      - "torch.cuda.outofmemoryerror"
+      - "cuda out of memory"
+      - "out of memory"
+      - "outofmemoryerror"
+    class: genuine-oom
+    note: >-
+      Appendix A rows 1+2: torch.cuda.OutOfMemoryError (Cliff-2
+      accumulated-ctx ~21-26K OR prefill-cliff ~50-60K DeltaNet GDN).
+      Tier-1 fast-path eligible — but Tier-1 is F3; F2 classifies + files
+      genuine-oom yet NEVER routes it as a kv-calc bug.
