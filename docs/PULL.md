@@ -14,12 +14,17 @@ anything, and is honest about how much it trusts the answer.
 > arch-registry expansion (materially more safetensors models reach
 > `engine-supported`), an optional hardware-detect slice for non-NVIDIA
 > enumeration, and the `--recommend` UX (an honest aggregated
-> recommendation over the same verdict). **GGUF is deferred** — it is not
-> a v0.8.2 item: cross-engine generation (GGUF / llama.cpp serving via
-> `pull`) is a separate **§9 cross-engine design-unlock proposal**, not
-> this release. Pointing `pull` at a GGUF-only repo is a known scope
-> boundary, not a stack failure (see [the readiness
-> ledger](#release-readiness-ledger--honest-deferrals) below).
+> recommendation over the same verdict). This release also **bundles two
+> non-`pull` items that shipped on the same branch**: N-GPU NVLink
+> auto-detection (wired into the multi-4 and Gemma-4-26B dual composes)
+> and a documentation restructure (a quick-start-first README, a new
+> `GETTING_STARTED.md`, model READMEs, and an updated docs index) — both
+> are independent of and orthogonal to the `pull` decision path. **GGUF
+> is deferred** — it is not a v0.8.2 item: cross-engine generation (GGUF
+> / llama.cpp serving via `pull`) is a separate **§9 cross-engine
+> design-unlock proposal**, not this release. Pointing `pull` at a
+> GGUF-only repo is a known scope boundary, not a stack failure (see [the
+> readiness ledger](#release-readiness-ledger--honest-deferrals) below).
 
 This is the **user front door**. For the contributor/maintainer internals
 of the same pipeline (gate strata, classifier, trust pipeline) start at
@@ -363,7 +368,10 @@ at the explicit-directory form:
 
 `pull` evaluates and serves **safetensors via vLLM only**. This is a
 deliberate scope boundary, stated up front so a §9 reader is not
-surprised:
+surprised. v0.8.2's shipped scope is the four `pull` items below **plus**
+two orthogonal, non-`pull` items that landed on the same release branch
+(N-GPU NVLink auto-detection and a documentation restructure) — listed
+here so the bundled scope is stated honestly, not under-claimed:
 
 | Item | Status in v0.8.2 |
 |---|---|
@@ -372,6 +380,8 @@ surprised:
 | Arch-registry expansion (more models reach `engine-supported`) | shipped (v0.8.2) |
 | Optional non-NVIDIA hardware-detect slice | shipped (v0.8.2, optional) |
 | `--recommend` UX | shipped (v0.8.2) |
+| N-GPU NVLink auto-detection (multi-4 + Gemma-4-26B dual composes) | shipped (v0.8.2, bundled — not a `pull` item) |
+| Documentation restructure (quick-start README, `GETTING_STARTED.md`, model READMEs, docs index) | shipped (v0.8.2, bundled — not a `pull` item) |
 | **GGUF** repos (evaluate **and** serve) | **deferred — see below** |
 | **`.bin`** / non-safetensors weight layouts | deferred |
 | Cross-engine generation (llama.cpp serving via `pull`) | deferred — see below |
