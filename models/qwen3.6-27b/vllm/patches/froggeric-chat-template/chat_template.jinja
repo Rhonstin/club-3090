@@ -39,156 +39,178 @@
         {{- raise_exception('Unexpected content type.') }}
     {%- endif %}
 {%- endmacro %}
-{%- set ns_flags = namespace(enable_thinking=true) %}
+{%- set ns_flags = namespace(enable_thinking=true, has_tools=false, last_tool_failed=false, consecutive_failures=0) %}
 {%- if enable_thinking is defined %}
     {%- set ns_flags.enable_thinking = enable_thinking %}
 {%- endif %}
 {%- if not messages %}
     {{- raise_exception('No messages provided.') }}
 {%- endif %}
+{%- set system_content = '' %}
+{%- set has_system = false %}
+{%- if messages[0].role == 'system' or messages[0].role == 'developer' %}
+    {%- set has_system = true %}
+    {%- set system_content = render_content(messages[0].content, false, true)|trim %}
+    {%- if '<|think_off|>' in system_content %}
+        {%- set ns_flags.enable_thinking = false %}
+        {%- set system_content = system_content | replace('<|think_off|>', '') %}
+    {%- endif %}
+    {%- if '<|think_on|>' in system_content %}
+        {%- set ns_flags.enable_thinking = true %}
+        {%- set system_content = system_content | replace('<|think_on|>', '') %}
+    {%- endif %}
+    {%- set system_content = system_content | trim %}
+{%- endif %}
 {%- if tools and tools is iterable and tools is not mapping %}
+    {%- set ns_flags.has_tools = true %}
     {{- '<|im_start|>system\n' }}
     {{- "# Tools\n\nYou have access to the following functions:\n\n<tools>" }}
     {%- for tool in tools %}
-        {{- "\n" }}
-        {{- tool | tojson }}
+        {{- '\n' }}
+        {%- set fn = tool.function if tool.function is defined else tool %}
+        {{- fn | tojson }}
     {%- endfor %}
     {{- "\n</tools>" }}
-    {{- '\n\nIf you choose to call a function ONLY reply in the following format with NO suffix:\n\n<tool_call>\n<function=example_function_name>\n<parameter=example_parameter_1>\nvalue_1\n</parameter>\n<parameter=example_parameter_2>\nThis is the value for the second parameter\nthat can span\nmultiple lines\n</parameter>\n</function>\n</tool_call>\n\n<IMPORTANT>\nReminder:\n- Function calls MUST follow the specified format: an inner <function=...></function> block must be nested within <tool_call></tool_call> XML tags\n- Required parameters MUST be specified\n- You may provide optional reasoning for your function call in natural language BEFORE the function call, but NOT after\n- If there is no function call available, answer the question like normal with your current knowledge and do not tell the user about function calls\n</IMPORTANT>' }}
-    {%- if messages[0].role == 'system' or messages[0].role == 'developer' %}
-        {%- set content = render_content(messages[0].content, false, true)|trim %}
-        {%- if '<|think_off|>' in content %}
-            {%- set ns_flags.enable_thinking = false %}
-            {%- set content = content.replace('<|think_off|>', '') %}
-        {%- endif %}
-        {%- if '<|think_on|>' in content %}
-            {%- set ns_flags.enable_thinking = true %}
-            {%- set content = content.replace('<|think_on|>', '') %}
-        {%- endif %}
-        {%- set content = content.strip() %}
-        {%- if content %}
-            {{- '\n\n' + content }}
-        {%- endif %}
+    {%- set tool_instructions %}
+If you choose to call a function ONLY reply in the following format with NO suffix:
+
+<think>
+Brief explanation of tool call
+</think>
+<tool_call>
+<function=example_function_name>
+<parameter=example_parameter_1>
+value_1
+</parameter>
+<parameter=example_parameter_2>
+This is the value for the second parameter
+that can span
+multiple lines
+</parameter>
+</function>
+</tool_call>
+
+<IMPORTANT>
+Reminder:
+- You can use the <think></think> block to plan your next tool call OR to synthesize data and formulate your final response to the user.
+- ALL explanation and reasoning MUST be placed strictly inside the <think></think> block.
+- Function calls MUST follow the specified format: an inner <function=...></function> block must be nested within <tool_call></tool_call> XML tags.
+- If you choose to call a tool, you MUST output the <tool_call> block IMMEDIATELY after closing </think>. Do NOT output any conversational text before the tool call.
+- The <tool_call> and <function> tags MUST be at the very beginning of a new line, with NO spaces or indentation before them.
+- To call multiple functions, output a separate, completely closed <tool_call></tool_call> block for EACH function. Do NOT nest <tool_call> blocks.
+- If you have gathered all necessary data and do not need to call a tool, answer the question like normal and provide your final response to the user IMMEDIATELY after closing </think>.
+</IMPORTANT>
+    {%- endset %}
+    {{- '\n\n' ~ tool_instructions | trim }}
+    {%- if has_system and system_content %}
+        {{- '\n\n' + system_content }}
     {%- endif %}
     {{- '<|im_end|>\n' }}
-{%- else %}
-    {%- if messages[0].role == 'system' or messages[0].role == 'developer' %}
-        {%- set content = render_content(messages[0].content, false, true)|trim %}
-        {%- if '<|think_off|>' in content %}
-            {%- set ns_flags.enable_thinking = false %}
-            {%- set content = content.replace('<|think_off|>', '') %}
-        {%- endif %}
-        {%- if '<|think_on|>' in content %}
-            {%- set ns_flags.enable_thinking = true %}
-            {%- set content = content.replace('<|think_on|>', '') %}
-        {%- endif %}
-        {%- set content = content.strip() %}
-        {{- '<|im_start|>system\n' + content + '<|im_end|>\n' }}
-    {%- endif %}
-{%- endif %}
-{%- set ns = namespace(multi_step_tool=true, last_query_index=messages|length - 1) %}
-{%- for message in messages[::-1] %}
-    {%- set index = (messages|length - 1) - loop.index0 %}
-    {%- if ns.multi_step_tool and message.role == "user" %}
-        {%- set content = render_content(message.content, false)|trim %}
-        {%- if not(content.startswith('<tool_response>') and content.endswith('</tool_response>')) %}
-            {%- set ns.multi_step_tool = false %}
-            {%- set ns.last_query_index = index %}
-        {%- endif %}
-    {%- endif %}
-{%- endfor %}
-{%- if ns.multi_step_tool %}
-    {%- set ns.last_query_index = messages|length - 1 %}
+{%- elif has_system and system_content %}
+    {{- '<|im_start|>system\n' + system_content + '<|im_end|>\n' }}
 {%- endif %}
 {%- for message in messages %}
-    {%- set content = render_content(message.content, true)|trim %}
+    {%- set is_system = (message.role == "system" or message.role == "developer") %}
+    {%- set content = render_content(message.content, true, is_system)|trim %}
     {%- if '<|think_off|>' in content %}
         {%- set ns_flags.enable_thinking = false %}
-        {%- set content = content.replace('<|think_off|>', '') %}
-    {%- endif %}
-    {%- if '<|think_on|>' in content %}
+        {%- set content = content | replace('<|think_off|>', '') | trim %}
+    {%- elif '<|think_on|>' in content %}
         {%- set ns_flags.enable_thinking = true %}
-        {%- set content = content.replace('<|think_on|>', '') %}
+        {%- set content = content | replace('<|think_on|>', '') | trim %}
     {%- endif %}
-    {%- set content = content.strip() %}
-    {%- if message.role == "system" or message.role == "developer" %}
-        {%- if not loop.first %}
-            {{- raise_exception('System message must be at the beginning.') }}
+    {%- if is_system %}
+        {%- if not loop.first and content %}
+            {{- '<|im_start|>system\n' + content + '<|im_end|>\n' }}
         {%- endif %}
     {%- elif message.role == "user" %}
-        {{- '<|im_start|>' + message.role + '\n' + content + '<|im_end|>' + '\n' }}
+        {{- '<|im_start|>' + message.role + '\n' + content + '<|im_end|>\n' }}
+        {%- set ns_flags.last_tool_failed = false %}
+        {%- set ns_flags.consecutive_failures = 0 %}
     {%- elif message.role == "assistant" %}
+        {%- set ns_flags.last_tool_failed = false %}
         {%- set reasoning_content = '' %}
-        {#- Auto-close unclosed think before tool_call -#}
-        {%- if '<think>' in content and '<tool_call>' in content %}
-            {%- set last_think = content.rfind('<think>') %}
-            {%- set last_close = content.rfind('</think>') %}
-            {%- set tool_pos = content.find('<tool_call>') %}
-            {%- if last_close < last_think or last_close == -1 %}
-                {%- if tool_pos > last_think %}
-                    {%- set content = content[:tool_pos] + '</think>' + content[tool_pos:] %}
-                {%- else %}
-                    {%- set content = content + '</think>' %}
-                {%- endif %}
-            {%- endif %}
-        {%- endif %}
         {%- if message.reasoning_content is string %}
             {%- set reasoning_content = message.reasoning_content %}
         {%- else %}
-            {%- set has_think_tag = false %}
-            {%- set think_end_token = '</think>' %}
+            {%- set think_end_token = '' %}
             {%- if '</think>' in content %}
-                {%- set has_think_tag = true %}
+                {%- set think_end_token = '</think>' %}
             {%- elif '</thinking>' in content %}
-                {%- set has_think_tag = true %}
                 {%- set think_end_token = '</thinking>' %}
+            {%- elif '</ think>' in content %}
+                {%- set think_end_token = '</ think>' %}
+            {%- elif '</think >' in content %}
+                {%- set think_end_token = '</think >' %}
+            {%- endif %}
+            {%- if think_end_token %}
+                {%- set reasoning_parts = content.split(think_end_token) %}
+                {%- set reasoning_content = reasoning_parts[0] %}
+                {%- set content = reasoning_parts[1:] | join(think_end_token) %}
+                {%- if '<think>' in reasoning_content %}
+                    {%- set r_prefix = reasoning_content.split('<think>')[0] | trim %}
+                    {%- set reasoning_content = reasoning_content.split('<think>')[1:] | join('<think>') | trim %}
+                    {%- set content = (r_prefix ~ '\n' ~ content) | trim %}
+                {%- endif %}
             {%- elif '<think>' in content %}
-                {%- set reasoning_content = content.split('<think>')[-1].lstrip('\n') %}
-                {%- set content = '' %}
-            {%- endif %}
-            {%- if has_think_tag %}
-                {%- set reasoning_content = content.split(think_end_token)[0].rstrip('\n').split('<think>')[-1].lstrip('\n') %}
-                {%- set content = content.split(think_end_token)[-1].lstrip('\n') %}
+                {%- set prefix = content.split('<think>')[0] %}
+                {%- set think_part = content.split('<think>')[1:] | join('<think>') %}
+                {%- if '<tool_call>' in think_part %}
+                    {%- set reasoning_content = think_part.split('<tool_call>')[0] %}
+                    {%- set content = prefix ~ '\n<tool_call>' ~ think_part.split('<tool_call>')[1:] | join('<tool_call>') %}
+                {%- else %}
+                    {%- set reasoning_content = think_part %}
+                    {%- set content = prefix %}
+                {%- endif %}
             {%- endif %}
         {%- endif %}
-        {%- set reasoning_content = reasoning_content|trim %}
-        {%- set show_think = false %}
-        {%- if loop.index0 > ns.last_query_index %}
-            {%- set show_think = true %}
-        {%- elif ns_flags.enable_thinking and (preserve_thinking is undefined or preserve_thinking is true) and reasoning_content|length > 0 %}
-            {%- set show_think = true %}
+        {%- set reasoning_content = reasoning_content | trim %}
+        {%- set content = content | trim %}
+        {%- if message.tool_calls and message.tool_calls is iterable and message.tool_calls is not mapping %}
+            {%- if '<tool_call>' in content %}
+                {%- set content = content.split('<tool_call>')[0] | trim %}
+            {%- endif %}
         {%- endif %}
-        {%- if show_think %}
-            {{- '<|im_start|>' + message.role + '\n<think>\n' + reasoning_content + '\n</think>\n\n' + content }}
+        {%- set show_think = true %}
+        {%- if preserve_thinking is defined and preserve_thinking == false %}
+            {%- set show_think = false %}
+        {%- endif %}
+        {%- if not reasoning_content %}
+            {%- set show_think = false %}
+        {%- endif %}
+        
+        {%- if show_think and ns_flags.enable_thinking is not false %}
+            {%- if content %}
+                {{- '<|im_start|>' + message.role + '\n<think>\n' + reasoning_content + '\n</think>\n' + content }}
+            {%- else %}
+                {{- '<|im_start|>' + message.role + '\n<think>\n' + reasoning_content + '\n</think>' }}
+            {%- endif %}
         {%- else %}
-            {{- '<|im_start|>' + message.role + '\n' + content }}
+            {%- if content %}
+                {{- '<|im_start|>' + message.role + '\n' + content }}
+            {%- else %}
+                {{- '<|im_start|>' + message.role }}
+            {%- endif %}
         {%- endif %}
         {%- if message.tool_calls and message.tool_calls is iterable and message.tool_calls is not mapping %}
             {%- for tool_call in message.tool_calls %}
                 {%- if tool_call.function is defined %}
                     {%- set tool_call = tool_call.function %}
                 {%- endif %}
-                {%- if loop.first %}
-                    {%- if content|trim %}
-                        {{- '\n\n<tool_call>\n<function=' + tool_call.name + '>\n' }}
-                    {%- else %}
-                        {{- '<tool_call>\n<function=' + tool_call.name + '>\n' }}
-                    {%- endif %}
-                {%- else %}
-                    {{- '\n<tool_call>\n<function=' + tool_call.name + '>\n' }}
-                {%- endif %}
+                {{- '\n<tool_call>\n' }}
+                {{- '<function=' ~ tool_call.name ~ '>\n' }}
                 {%- if tool_call.arguments is defined and tool_call.arguments is mapping %}
-                    {%- if tool_call.arguments|length > 0 %}
+                    {%- if tool_call.arguments | length > 0 %}
                         {%- for args_name in tool_call.arguments %}
                             {%- set args_value = tool_call.arguments[args_name] %}
-                            {{- '<parameter=' + args_name + '>\n' }}
-                            {%- set args_value = args_value | string if args_value is string else args_value | tojson %}
+                            {{- '<parameter=' ~ args_name ~ '>\n' }}
+                            {%- set args_value = args_value | tojson if args_value is mapping or (args_value is iterable and args_value is not string) else args_value | string %}
                             {{- args_value }}
                             {{- '\n</parameter>\n' }}
                         {%- endfor %}
                     {%- endif %}
                 {%- elif tool_call.arguments is defined and tool_call.arguments is string %}
-                    {%- if tool_call.arguments|trim|length > 0 %}
+                    {%- if tool_call.arguments | trim | length > 0 %}
                         {{- tool_call.arguments }}
                         {{- '\n' }}
                     {%- endif %}
@@ -198,13 +220,31 @@
         {%- endif %}
         {{- '<|im_end|>\n' }}
     {%- elif message.role == "tool" %}
-        {%- if loop.previtem and loop.previtem.role != "tool" %}
+        {%- set content_lower = content | lower %}
+        {%- if content | length < 500
+            and '$ ' not in content
+            and 'took ' not in content_lower
+            and ('"error":' in content_lower or 'error:' in content_lower or 'exception:' in content_lower or 'traceback' in content_lower or 'command not found' in content_lower or 'invalid syntax' in content_lower or 'failed to' in content_lower) %}
+            {%- set ns_flags.last_tool_failed = true %}
+            {%- set ns_flags.consecutive_failures = ns_flags.consecutive_failures + 1 %}
+        {%- else %}
+            {%- set ns_flags.last_tool_failed = false %}
+            {%- set ns_flags.consecutive_failures = 0 %}
+        {%- endif %}
+        {%- if loop.index0 > 0 and messages[loop.index0 - 1].role != "tool" %}
             {{- '<|im_start|>user' }}
         {%- endif %}
         {{- '\n<tool_response>\n' }}
         {{- content }}
+        {%- if ns_flags.last_tool_failed %}
+            {%- if ns_flags.consecutive_failures >= 2 %}
+                {{- '\n\n⚠️ SYSTEM WARNING: ' ~ ns_flags.consecutive_failures ~ ' consecutive tool errors detected. Your previous approach is incorrect. You MUST use a fundamentally different approach or corrected arguments.' }}
+            {%- else %}
+                {{- '\n\n⚠️ SYSTEM WARNING: The previous tool call returned an error. Diagnose the failure and retry with completely corrected arguments.' }}
+            {%- endif %}
+        {%- endif %}
         {{- '\n</tool_response>' }}
-        {%- if not loop.last and loop.nextitem.role != "tool" %}
+        {%- if not loop.last and messages[loop.index0 + 1].role != "tool" %}
             {{- '<|im_end|>\n' }}
         {%- elif loop.last %}
             {{- '<|im_end|>\n' }}
@@ -216,7 +256,9 @@
 {%- if add_generation_prompt %}
     {{- '<|im_start|>assistant\n' }}
     {%- if ns_flags.enable_thinking is false %}
-        {{- '<think>\n\n</think>\n\n' }}
+        {{- '<think>\n</think>\n' }}
+    {%- elif ns_flags.last_tool_failed and ns_flags.consecutive_failures >= 2 %}
+        {{- '<think>\n</think>\n' }}
     {%- else %}
         {{- '<think>\n' }}
     {%- endif %}
