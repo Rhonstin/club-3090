@@ -1513,12 +1513,16 @@ check(not _rec_cp.ok and _rec_cp.stratum is P.Stratum.DECIDED
       and _rec_cp.abort_reason.startswith("confirm→proceed"),
       "rec(2a): the confirm→proceed leg is a REAL estimated-lower-bound "
       f"non-pass (ok={_rec_cp.ok}, reason={_rec_cp.abort_reason!r})")
-check("DOES NOT FIT / BLOCKED" in _blk_cp
+check("FITS (estimated) — NOT YET ACCEPTED" in _blk_cp
+      and "DOES NOT FIT" not in _blk_cp
       and _rec_cp.abort_reason in _blk_cp
-      and "--submit-last" in _blk_cp
+      and "ACCEPTANCE gate, not a fit failure" in _blk_cp
+      and "--submit-last" not in _blk_cp
       and f"stratum={_rec_cp.stratum.name}" in _blk_cp,
-      "rec(2a): confirm→proceed (not ok) -> the BLOCKED branch carries the "
-      "REAL abort_reason + the failure on-ramp pointer + the REAL stratum")
+      "rec(2a): a fits-clean confirm→proceed (not ok, NOT --yes) is HONESTLY "
+      "rendered as FITS-but-NOT-YET-ACCEPTED (never 'DOES NOT FIT'), carries "
+      "the REAL abort_reason + the acceptance-gate guidance + the REAL "
+      "stratum, and does NOT misroute to the failure on-ramp")
 check(P.CAVEAT_S7 not in _rec_cp.notices
       and "SOAK_MODE=continuous" not in _blk_cp,
       "rec(2a): a not-yet-satisfied confirm→proceed carries NO §7 caveat "

@@ -1530,18 +1530,50 @@ def _render_recommendation(res: "PullResult") -> list[str]:
                 "verdict only, not a launchable artifact."
             )
     else:
-        # The gate hard-blocked / needs-a-flag. Carry the precise reason and
-        # WHICH gate decided; point at the failure on-ramp (CONTRACT-1).
+        # `res.ok` is False, but that means "the run did not produce a
+        # launchable artifact" — NOT necessarily "does not fit". Distinguish
+        # the gate's *acceptance* terminals (it fits the modelled budget; the
+        # run merely needs an explicit flag) from a genuine hard-block.
+        # Honesty (CONTRACT-4): never label a fits-clean model "DOES NOT FIT".
+        # Pure presentation: still derives only from `res`, no decision logic.
         reason = res.abort_reason or "see the gate output above"
-        out.append(
-            f"[recommend] verdict: DOES NOT FIT / BLOCKED — {reason}"
+        _rv = res.raw_verdict or ""
+        _ar = res.abort_reason or ""
+        _needs_accept = _rv == "fits-clean" and (
+            _ar.startswith("confirm→proceed")
+            or _ar.startswith("override-accepted")
+            or "needs --yes" in _ar
+            or "needs --force-download" in _ar
         )
-        out.append(
-            "[recommend] this is an honest stop, not a stack failure. The "
-            "diagnostics (if a redacted bundle was captured) can be sent "
-            "back with `scripts/pull.sh --submit-last` — see the failure "
-            "on-ramp section of docs/PULL.md."
-        )
+        if _needs_accept:
+            out.append(
+                f"[recommend] verdict: FITS (estimated) — NOT YET ACCEPTED: "
+                f"{reason} (confidence={res.confidence or 'n/a'}, "
+                f"raw_verdict={res.raw_verdict or 'n/a'})"
+            )
+            out.append(
+                "[recommend] the model fits the gate's modelled budget — this "
+                "is an ACCEPTANCE gate, not a fit failure. Re-run with the "
+                "flag named in the reason above to proceed."
+            )
+            if res.confidence == "estimated-lower-bound":
+                out.append(
+                    "[recommend] note: this is an ESTIMATED LOWER BOUND — the "
+                    "modelled VRAM is a floor and is likely under-modelled; "
+                    "treat the fit as the optimistic edge, not a guarantee."
+                )
+        else:
+            # Genuine hard-block / needs-a-flag. Carry the precise reason and
+            # WHICH gate decided; point at the failure on-ramp (CONTRACT-1).
+            out.append(
+                f"[recommend] verdict: DOES NOT FIT / BLOCKED — {reason}"
+            )
+            out.append(
+                "[recommend] this is an honest stop, not a stack failure. The "
+                "diagnostics (if a redacted bundle was captured) can be sent "
+                "back with `scripts/pull.sh --submit-last` — see the failure "
+                "on-ramp section of docs/PULL.md."
+            )
 
     # WHICH gate decided — always stated (CONTRACT-4: never silently
     # summarised). Read straight off the real result.
