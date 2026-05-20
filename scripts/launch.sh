@@ -228,7 +228,8 @@ declare -A LAUNCH_VARIANT_COMPOSE=(
   [vllm/gemma-mtp-tp1]="models/gemma-4-31b/vllm/compose/single/docker-compose.yml"
   [vllm/gemma-dflash]="models/gemma-4-31b/vllm/compose/dual/dflash.yml"
   [llamacpp/default]="models/qwen3.6-27b/llama-cpp/compose/single/docker-compose.yml"
-  [llamacpp/concurrent]="models/qwen3.6-27b/llama-cpp/compose/single/concurrent.yml"
+  [llamacpp/mtp]="models/qwen3.6-27b/llama-cpp/compose/single/mtp.yml"
+  [llamacpp/mtp-vision]="models/qwen3.6-27b/llama-cpp/compose/single/mtp-vision.yml"
 )
 declare -A LAUNCH_VARIANT_MODEL=(
   [vllm/default]="qwen3.6-27b" [vllm/long-vision]="qwen3.6-27b" [vllm/long-text]="qwen3.6-27b"
@@ -238,7 +239,7 @@ declare -A LAUNCH_VARIANT_MODEL=(
   [vllm/dual-dflash-noviz]="qwen3.6-27b" [vllm/dual-nvlink]="qwen3.6-27b" [vllm/dual-nvlink-turbo]="qwen3.6-27b"
   [vllm/dual-nvlink-dflash]="qwen3.6-27b" [vllm/dual-nvlink-dflash-noviz]="qwen3.6-27b"
   [vllm/gemma-mtp]="gemma-4-31b" [vllm/gemma-mtp-tp1]="gemma-4-31b" [vllm/gemma-dflash]="gemma-4-31b"
-  [llamacpp/default]="qwen3.6-27b" [llamacpp/concurrent]="qwen3.6-27b"
+  [llamacpp/default]="qwen3.6-27b" [llamacpp/mtp]="qwen3.6-27b" [llamacpp/mtp-vision]="qwen3.6-27b"
 )
 declare -A LAUNCH_VARIANT_ENGINE=(
   [vllm/default]="vllm" [vllm/long-vision]="vllm" [vllm/long-text]="vllm" [vllm/long-text-no-mtp]="vllm"
@@ -247,7 +248,7 @@ declare -A LAUNCH_VARIANT_ENGINE=(
   [vllm/dual-dflash-noviz]="vllm" [vllm/dual-nvlink]="vllm" [vllm/dual-nvlink-turbo]="vllm"
   [vllm/dual-nvlink-dflash]="vllm" [vllm/dual-nvlink-dflash-noviz]="vllm"
   [vllm/gemma-mtp]="vllm" [vllm/gemma-mtp-tp1]="vllm" [vllm/gemma-dflash]="vllm"
-  [llamacpp/default]="llamacpp" [llamacpp/concurrent]="llamacpp"
+  [llamacpp/default]="llamacpp" [llamacpp/mtp]="llamacpp" [llamacpp/mtp-vision]="llamacpp"
 )
 declare -A LAUNCH_VARIANT_KVCALC=(
   [vllm/default]="qwen3.6-27b:long-vision"
@@ -271,7 +272,8 @@ declare -A LAUNCH_VARIANT_KVCALC=(
   [vllm/gemma-mtp-tp1]="gemma-4-31b:gemma-single"
   [vllm/gemma-dflash]="gemma-4-31b:gemma-dual-dflash"
   [llamacpp/default]="SKIP"
-  [llamacpp/concurrent]="SKIP"
+  [llamacpp/mtp]="SKIP"
+  [llamacpp/mtp-vision]="SKIP"
 )
 LAUNCH_VARIANT_ORDER=(
   vllm/long-vision vllm/long-text vllm/long-text-no-mtp vllm/bounded-thinking
@@ -279,7 +281,7 @@ LAUNCH_VARIANT_ORDER=(
   vllm/dual vllm/dual-turbo vllm/dual-dflash vllm/dual-dflash-noviz
   vllm/dual4 vllm/dual4-dflash
   vllm/gemma-mtp vllm/gemma-mtp-tp1 vllm/gemma-dflash
-  llamacpp/default llamacpp/concurrent
+  llamacpp/default llamacpp/mtp llamacpp/mtp-vision
 )
 
 variant_hw_status() {
@@ -1124,7 +1126,8 @@ declare -A LAUNCH_DEFAULT_PORT=(
   [vllm/gemma-mtp-tp1]=8031
   [vllm/gemma-dflash]=8032
   [llamacpp/default]=8020
-  [llamacpp/concurrent]=8020
+  [llamacpp/mtp]=8020
+  [llamacpp/mtp-vision]=8020
 )
 declare -A LAUNCH_DEFAULT_CONTAINER=(
   [vllm/default]=vllm-qwen36-27b
@@ -1148,7 +1151,8 @@ declare -A LAUNCH_DEFAULT_CONTAINER=(
   [vllm/gemma-mtp-tp1]=vllm-gemma-4-31b-mtp-tp1
   [vllm/gemma-dflash]=vllm-gemma-4-31b-dflash
   [llamacpp/default]=llama-cpp-qwen36-27b
-  [llamacpp/concurrent]=llama-cpp-qwen36-27b-concurrent
+  [llamacpp/mtp]=llama-cpp-qwen36-27b
+  [llamacpp/mtp-vision]=llama-cpp-qwen36-27b
 )
 ENDPOINT_PORT="${PORT:-${LAUNCH_DEFAULT_PORT[$VARIANT]:-8020}}"
 ENDPOINT_URL="http://localhost:${ENDPOINT_PORT}"

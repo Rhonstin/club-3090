@@ -284,7 +284,9 @@ Symptoms users report: "performance degrades after 20 turns", "throughput drops 
 bash scripts/switch.sh vllm/dual    # 111+ TPS p50, 0 errors, 0 MiB growth across 5 sessions
 
 # 1× 3090 — different engine, different kernels, different allocator
-bash scripts/switch.sh llamacpp/default    # 21 TPS, 262K context, cliff-immune
+bash scripts/switch.sh llamacpp/default      # 21 TPS, 262K context, cliff-immune, vision
+bash scripts/switch.sh llamacpp/mtp          # ~60 code TPS, 131K, MTP, 7/7 verify-stress (incl. 91K needle)
+bash scripts/switch.sh llamacpp/mtp-vision   # ~66 code TPS, 49K + vision (multimodal MTP)
 ```
 
 **Want to verify your rig hits the same class:**

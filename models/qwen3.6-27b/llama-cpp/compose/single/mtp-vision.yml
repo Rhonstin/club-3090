@@ -1,0 +1,102 @@
+# ===========================================================================
+# Profile (at-a-glance):
+#   Model:     Qwen3.6-27B (Unsloth MTP-enabled Q4_K_M GGUF) + mmproj-F16
+#   Engine:    llama.cpp (local MTP-enabled build, build 9235)
+#   Topology:  Single 3090 (TP=1)
+#   Drafter:   MTP n=2 (--spec-type draft-mtp, sweet spot)
+#   KV:        q4_0 K + q4_0 V
+#   Vision:    YES (mmproj-F16 mounted — multimodal input enabled)
+#   Max ctx:   49152 (safe-headroom max with vision on 24 GB; sweep-verified)
+#   Genesis:   N/A — llama.cpp engine
+#   Status:    ✅ Production (NEW — first stack profile combining MTP + vision)
+#   Engine-profile: llama-cpp-local
+#   Best for:  Multimodal chat, screenshot-debugging, vision-aware code review.
+#              ~51/60 TPS text + vision overhead paid once at image-encode.
+# ---------------------------------------------------------------------------
+# Qwen3.6-27B on llama.cpp — single 3090, MTP, 49K ctx, VISION ON.
+#
+# This is one of three named single-card profiles for this model:
+#   - docker-compose.yml  → vanilla 262K + vision, cliff-immune fallback
+#   - mtp.yml             → MTP n=2 + 131K + no vision (fast + ctx)
+#   - mtp-vision.yml      → MTP n=2 + 49K + vision (THIS file — multimodal + fast)
+#
+# Historical note: the older single compose stripped --mmproj when MTP was
+# enabled, treating MTP + vision as incompatible. **That rule was obsolete
+# on build 9235** — sweep-verified 2026-05-19 that MTP + vision coexist
+# cleanly, this profile is the first to ship the combination.
+#
+# Stack-wide thinking-off-by-default policy applies (same as mtp.yml). Native
+# template (NOT froggeric) + `--reasoning off`. Cliff-survival: -ub 1024.
+#
+# VRAM budget on 24 GB (Q4_K_M + vision):
+#   weights (Q4_K_M):              ~17.0 GB
+#   KV at 49K (q4_0 K+V):           ~1.9 GB
+#   mmproj F16 (vision projector):  ~0.8 GB
+#   MTP draft head + overhead:      ~0.5 GB
+#   total:                         ~20.2 GB
+#   headroom:                       ~2.0 GB for prompt + activation peaks +
+#                                   image-encode tile buffer
+#
+# Why 49K ctx (vs mtp.yml's 131K): the mmproj F16 plus image-encode tile
+# buffers consume the headroom that the no-vision profile spends on KV.
+# 49K is the safe-headroom ceiling sweep-verified at this config; pushing
+# higher risks OOM on the first vision request.
+#
+# Quick start:
+#   1. Get the MTP-enabled GGUF + the vision projector:
+#        hf download unsloth/Qwen3.6-27B-MTP-GGUF Qwen3.6-27B-Q4_K_M.gguf \
+#          --local-dir $MODEL_DIR/qwen3.6-27b-gguf/unsloth-mtp-q4km
+#        hf download unsloth/Qwen3.6-27B-GGUF mmproj-F16.gguf \
+#          --local-dir $MODEL_DIR/qwen3.6-27b-gguf
+#   2. From this directory:
+#        MODEL_DIR=/your/models/dir docker compose -f mtp-vision.yml up -d
+#   3. curl http://localhost:8020/v1/models  → should list the model.
+#
+# Override defaults via .env or shell:
+#   MODEL_DIR              host dir to mount as /models
+#   GGUF_FILE              path under /models  (default: …unsloth-mtp-q4km/Qwen3.6-27B-Q4_K_M.gguf)
+#   MMPROJ_FILE            path under /models  (default: qwen3.6-27b-gguf/mmproj-F16.gguf)
+#   CTX_SIZE               KV pool size        (default: 49152 — safe-headroom max with vision)
+#   BATCH_SIZE             llama.cpp -b        (default: 4096)
+#   UBATCH_SIZE            llama.cpp -ub       (default: 1024 — cliff-survival)
+#   KV_TYPE                K and V quant type  (default: q4_0)
+#   MTP_DRAFT_N_MAX        MTP draft tokens    (default: 2)
+#   REASONING              thinking gate       (default: off)
+#   REASONING_FORMAT       reasoning routing   (default: deepseek)
+#   PORT                   host port           (default: 8020)
+#   CUDA_VISIBLE_DEVICES   which GPU to use    (default: 0)
+
+services:
+  llama-cpp-qwen36-27b-mtp-vision:
+    image: llama-cpp:local
+    container_name: "${ESTATE_CONTAINER:-llama-cpp-qwen36-27b}"
+    restart: unless-stopped
+    ports:
+      - "${ESTATE_PORT:-${PORT:-8020}}:8080"
+    volumes:
+      - "${MODEL_DIR:-../../../../../models-cache}:/models:ro"
+    command: >-
+      --host 0.0.0.0
+      --port 8080
+      -m /models/${GGUF_FILE:-qwen3.6-27b-gguf/unsloth-mtp-q4km/Qwen3.6-27B-Q4_K_M.gguf}
+      --mmproj /models/${MMPROJ_FILE:-qwen3.6-27b-gguf/mmproj-F16.gguf}
+      -c ${CTX_SIZE:-49152}
+      -b ${BATCH_SIZE:-4096}
+      -ub ${UBATCH_SIZE:-1024}
+      -ngl 99
+      -fa on
+      --cache-type-k ${KV_TYPE:-q4_0}
+      --cache-type-v ${KV_TYPE:-q4_0}
+      -np 1
+      --spec-type draft-mtp
+      --spec-draft-n-max ${MTP_DRAFT_N_MAX:-2}
+      --jinja
+      --reasoning ${REASONING:-off}
+      --reasoning-format ${REASONING_FORMAT:-deepseek}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${ESTATE_GPUS:-${CUDA_VISIBLE_DEVICES:-0}}"]
+              capabilities: [compute, utility]

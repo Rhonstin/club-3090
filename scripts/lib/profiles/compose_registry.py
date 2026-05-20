@@ -227,16 +227,23 @@ COMPOSE_REGISTRY = {
     # Qwen 3.6 27B, llama.cpp single-card.
     "llamacpp/default": _entry(
         model="qwen3.6-27b", weights_variant="gguf", workload="long-ctx-single",
-        engine="llama-cpp-mainline", drafter=None, kv_format="q4_0",
+        engine="llama-cpp-local", drafter=None, kv_format="q4_0",
         tp=1, max_ctx=262144, max_num_seqs=1, mem_util=None,
         compose_path="models/qwen3.6-27b/llama-cpp/compose/single/docker-compose.yml",
         default_port=8020,
     ),
-    "llamacpp/concurrent": _entry(
-        model="qwen3.6-27b", weights_variant="gguf", workload="multi-stream-tenant",
-        engine="llama-cpp-mainline", drafter=None, kv_format="q4_0",
-        tp=1, max_ctx=192000, max_num_seqs=4, mem_util=None,
-        compose_path="models/qwen3.6-27b/llama-cpp/compose/single/concurrent.yml",
+    "llamacpp/mtp": _entry(
+        model="qwen3.6-27b", weights_variant="gguf", workload="fast-chat",
+        engine="llama-cpp-local", drafter="qwen-mtp-builtin", kv_format="q4_0",
+        tp=1, max_ctx=131072, max_num_seqs=1, mem_util=None,
+        compose_path="models/qwen3.6-27b/llama-cpp/compose/single/mtp.yml",
+        default_port=8020,
+    ),
+    "llamacpp/mtp-vision": _entry(
+        model="qwen3.6-27b", weights_variant="gguf", workload="vision-coding",
+        engine="llama-cpp-local", drafter="qwen-mtp-builtin", kv_format="q4_0",
+        tp=1, max_ctx=49152, max_num_seqs=1, mem_util=None,
+        compose_path="models/qwen3.6-27b/llama-cpp/compose/single/mtp-vision.yml",
         default_port=8020,
     ),
 

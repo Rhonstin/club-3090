@@ -41,14 +41,14 @@ assert_contains "$out" "vllm/minimal"
 assert_not_contains "$out" "vllm/long-text"
 
 out="$(python3 "$HELPER" filter-candidates \
-  --variants vllm/long-text,llamacpp/default,llamacpp/concurrent \
+  --variants vllm/long-text,llamacpp/default,llamacpp/mtp \
   --model qwen3.6-27b \
   --gpu-spec "$GPU_3090" \
   --tp 1 \
   --pp 1 \
   --stable)"
 assert_contains "$out" "llamacpp/default"
-assert_contains "$out" "llamacpp/concurrent"
+assert_contains "$out" "llamacpp/mtp"
 assert_not_contains "$out" "vllm/long-text"
 
 if out="$(python3 "$HELPER" validate-variant \

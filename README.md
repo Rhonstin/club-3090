@@ -29,7 +29,9 @@ bash scripts/launch.sh
 #    Or skip the wizard:
 #      bash scripts/launch.sh --variant vllm/default      # single-card chat (recommended)
 #      bash scripts/launch.sh --variant vllm/dual         # dual-card 262K + vision
-#      bash scripts/launch.sh --variant llamacpp/default  # single-card 262K, no cliffs
+#      bash scripts/launch.sh --variant llamacpp/default     # single-card 262K vanilla, no cliffs
+#      bash scripts/launch.sh --variant llamacpp/mtp         # single-card 131K + MTP (fast, ~60 code TPS)
+#      bash scripts/launch.sh --variant llamacpp/mtp-vision  # single-card 49K + MTP + vision
 #    Or partial flags (wizard fills the rest):
 #      bash scripts/launch.sh --model qwen3.6-27b --gpus 0,1
 #      bash scripts/launch.sh --tp 2 --pp 1               # override vLLM parallelism

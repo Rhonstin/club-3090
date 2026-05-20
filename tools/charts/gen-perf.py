@@ -39,7 +39,9 @@ configs_all = [
     ("tools-text 75K\nfp8 IDE-agent",  53.32, 69.66, "single-vllm"),
     ("bounded-thinking 180K\nstructured-CoT",  49.77, 65.80, "single-vllm"),
     ("minimal\n(no spec-dec)",    32.41, 32.56, "single-vllm"),
-    ("llama.cpp Q3_K_XL\n262K + vision", 21.22, 20.79, "single-llama"),
+    ("llamacpp/mtp\nQ4_K_M MTP 131K", 51.28, 59.72, "single-llama"),
+    ("llamacpp/mtp-vision\nQ4_K_M MTP+vision 49K", 56.52, 66.17, "single-llama"),
+    ("llamacpp/default\nQ3_K_XL 262K + vision", 21.22, 20.79, "single-llama"),
     ("llama.cpp Q4_K_M\n+ ngram-mod 32K",22.04, 26.11, "single-llama"),
     ("Luce DFlash 3.6+3.6*\nTQ3, 65K, greedy", 40.00, 71.65, "single-luce-watch"),
     ("dual.yml\n262K + vision",   69.05, 88.58, "dual-vllm"),
@@ -104,7 +106,7 @@ def make_chart(configs, out_stem, title_subject, figsize):
     ax.set_xticks(x)
     ax.set_xticklabels(labels, fontsize=9)
     ax.set_ylabel("TPS  (3 warm + 5 measured, canonical bench)", fontsize=10)
-    ax.set_title(f"Qwen3.6-27B  —  measured TPS {title_subject}  on  noonghunna/club-3090  (2026-05-02)",
+    ax.set_title(f"Qwen3.6-27B  —  measured TPS {title_subject}  on  noonghunna/club-3090  (updated 2026-05-20)",
                  fontsize=12, pad=36)
     ax.set_ylim(0, max(max(narr), max(code)) * 1.30)
     ax.grid(axis="y", linestyle=":", alpha=0.4)
@@ -120,7 +122,7 @@ def make_chart(configs, out_stem, title_subject, figsize):
 
     substrate_parts = ["vLLM 0.20.1rc1.dev16+g7a1eb8ac2 + Genesis v7.69 dev (2db18df) + vllm#35975 backport"]
     if any(g == "single-llama" for g in groups):
-        substrate_parts.append("llama.cpp mainline 0d0764dfd")
+        substrate_parts.append("llama.cpp mainline d14ce3dab (build 9235, MTP)")
     if any(g == "single-luce-watch" for g in groups):
         substrate_parts.append("Luce DFlash dflash@f12a87c (greedy only)")
     substrate_parts.append("RTX 3090 sm_86, PCIe-only, 230W")

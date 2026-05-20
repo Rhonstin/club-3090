@@ -1,0 +1,105 @@
+# ===========================================================================
+# Profile (at-a-glance):
+#   Model:     Qwen3.6-27B (Unsloth MTP-enabled Q4_K_M GGUF)
+#   Engine:    llama.cpp (local MTP-enabled build, build 9235)
+#   Topology:  Single 3090 (TP=1)
+#   Drafter:   MTP n=2 (--spec-type draft-mtp, sweet spot — see BENCHMARKS.md)
+#   KV:        q4_0 K + q4_0 V (densest mainline, Ampere-fast)
+#   Vision:    no (mmproj NOT mounted — for vision, see mtp-vision.yml)
+#   Max ctx:   131072 (safe-headroom max on 24 GB; sweep-verified)
+#   Genesis:   N/A — llama.cpp engine; Genesis is vLLM/Qwen3-Next-specific
+#   Status:    ✅ Production
+#   Engine-profile: llama-cpp-local
+#   Best for:  IDE agents, opencode, Hermes, long-multi-turn agentic — the
+#              speed + ctx workhorse. ~51 narr / ~60 code TPS, 7/7 verify-stress
+#              (incl. 60K + 91K needle), 102/150 quality (68%) on the 8-pack.
+# ---------------------------------------------------------------------------
+# Qwen3.6-27B on llama.cpp — single 3090, MTP, 131K ctx, no vision.
+#
+# This is one of three named single-card profiles for this model:
+#   - docker-compose.yml  → vanilla 262K + vision, cliff-immune fallback
+#   - mtp.yml             → MTP n=2 + 131K + no vision (THIS file — fast + ctx)
+#   - mtp-vision.yml      → MTP n=2 + 49K + vision (multimodal + fast)
+#
+# Why no vision here: mmproj F16 costs ~0.8 GB. Without it the MTP-safe ctx
+# ceiling jumps from ~49K to 131K (sweep-verified 2026-05-19 on build 9235).
+# If you don't need image input, this is the better MTP profile.
+#
+# Stack-wide thinking-off-by-default policy (matches the 22/24 vLLM composes
+# shipping chat_template_kwargs.enable_thinking=false). On llama.cpp the
+# right lever is `--reasoning off` against the *native* template (the one
+# embedded in the GGUF). The vLLM-only froggeric template is NOT mounted —
+# it has no llama.cpp thinking-mode Jinja hook and silently suppresses
+# `--reasoning off`. Native template + `--reasoning off` is the correct
+# llama.cpp interface; closes opencode hang (#97) cleanly without needing
+# the older `--reasoning-format none` workaround.
+#
+# Cliff-survival: -ub 1024 (lowered from the older 2048 default). The 25K
+# tool-prefill check in verify-stress fails at -ub 2048 on tight single-card
+# headroom; -ub 1024 halves the per-pass activation peak and the boundary
+# matrix goes 5/7 → 7/7. The "Cliff 2 single-prompt at 50–60K is
+# architectural" narrative is partially superseded by this config: at
+# -ub 1024 + 131K + MTP n=2 + thinking-off, verify-stress recalls needles
+# cleanly at 58K and 91K.
+#
+# VRAM budget on 24 GB (Q4_K_M):
+#   weights (Q4_K_M):             ~17.0 GB
+#   KV at 131K (q4_0 K+V):         ~5.0 GB
+#   MTP draft head + overhead:     ~0.5 GB
+#   total:                        ~22.5 GB
+#   headroom:                      ~1.6 GB for prompt + activation peaks
+#
+# Quick start:
+#   1. Get the MTP-enabled GGUF:
+#        hf download unsloth/Qwen3.6-27B-MTP-GGUF Qwen3.6-27B-Q4_K_M.gguf \
+#          --local-dir $MODEL_DIR/qwen3.6-27b-gguf/unsloth-mtp-q4km
+#   2. From this directory:
+#        MODEL_DIR=/your/models/dir docker compose -f mtp.yml up -d
+#   3. curl http://localhost:8020/v1/models  → should list the model.
+#
+# Override defaults via .env or shell:
+#   MODEL_DIR              host dir to mount as /models  (default: ../../../../../models-cache)
+#   GGUF_FILE              path under /models  (default: qwen3.6-27b-gguf/unsloth-mtp-q4km/Qwen3.6-27B-Q4_K_M.gguf)
+#   CTX_SIZE               KV pool size        (default: 131072 — safe-headroom max)
+#   BATCH_SIZE             llama.cpp -b        (default: 4096)
+#   UBATCH_SIZE            llama.cpp -ub       (default: 1024 — cliff-survival)
+#   KV_TYPE                K and V quant type  (default: q4_0)
+#   MTP_DRAFT_N_MAX        MTP draft tokens    (default: 2 — sweet spot per BENCHMARKS.md)
+#   REASONING              thinking gate       (default: off — stack-wide policy)
+#   REASONING_FORMAT       reasoning routing   (default: deepseek — hygiene)
+#   PORT                   host port           (default: 8020)
+#   CUDA_VISIBLE_DEVICES   which GPU to use    (default: 0)
+
+services:
+  llama-cpp-qwen36-27b-mtp:
+    image: llama-cpp:local
+    container_name: "${ESTATE_CONTAINER:-llama-cpp-qwen36-27b}"
+    restart: unless-stopped
+    ports:
+      - "${ESTATE_PORT:-${PORT:-8020}}:8080"
+    volumes:
+      - "${MODEL_DIR:-../../../../../models-cache}:/models:ro"
+    command: >-
+      --host 0.0.0.0
+      --port 8080
+      -m /models/${GGUF_FILE:-qwen3.6-27b-gguf/unsloth-mtp-q4km/Qwen3.6-27B-Q4_K_M.gguf}
+      -c ${CTX_SIZE:-131072}
+      -b ${BATCH_SIZE:-4096}
+      -ub ${UBATCH_SIZE:-1024}
+      -ngl 99
+      -fa on
+      --cache-type-k ${KV_TYPE:-q4_0}
+      --cache-type-v ${KV_TYPE:-q4_0}
+      -np 1
+      --spec-type draft-mtp
+      --spec-draft-n-max ${MTP_DRAFT_N_MAX:-2}
+      --jinja
+      --reasoning ${REASONING:-off}
+      --reasoning-format ${REASONING_FORMAT:-deepseek}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${ESTATE_GPUS:-${CUDA_VISIBLE_DEVICES:-0}}"]
+              capabilities: [compute, utility]

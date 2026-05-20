@@ -35,9 +35,13 @@ MODEL_DIR=/your/models/dir docker compose up -d
 
 Memory budget: 14.5 GB (Q3_K_XL) + 4.5 GB KV @ 262K + 0.8 GB mmproj ≈ 20 GB / 24 GB.
 
-### `single/concurrent.yml` — 4 parallel slots, vision
+### `single/mtp.yml` — MTP n=2, 131K ctx, no vision
 
-Trade max context for parallelism. Same image, `--parallel 4` + smaller ctx pool.
+The single-card speed + context workhorse: ~51/60 TPS (narr/code), 131K ctx (sweep-verified safe-headroom max), 7/7 verify-stress boundary checks (incl. 60K + 91K needle recall), 102/150 (68%) on the 8-pack quality matrix. Best for IDE agents, opencode, Hermes, long-multi-turn agentic. Q4_K_M MTP GGUF (`unsloth/Qwen3.6-27B-MTP-GGUF` Q4_K_M).
+
+### `single/mtp-vision.yml` — MTP n=2, 49K ctx, vision on
+
+Multimodal speed profile — the first stack config combining MTP + vision (the older "strip mmproj when MTP" rule was obsolete on build 9235, sweep-verified 2026-05-19). 49K safe-headroom ceiling on 24 GB with mmproj F16 mounted.
 
 ### Tuning knobs
 

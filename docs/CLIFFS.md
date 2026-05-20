@@ -59,6 +59,8 @@ llama.cpp uses **different kernels and a different memory allocator** than vLLM.
 
 Trade: llama.cpp gives up ~3× decode speed (21 TPS vs 67 on vLLM single when single works) for cliff-immunity at long context. Different engineering posture for different workload shapes.
 
+> **2026-05-19 update — `llamacpp/mtp` config closes most of the speed gap and walks past 91K cleanly.** With MTP `n=2` + `-ub 1024` + native template + `--reasoning off` on a single 3090, the llama.cpp path now measures **~51 narr / ~60 code TPS** (vs ~21 vanilla), and `verify-stress.sh` 7/7 — *including* the 60K + 91K needle rungs we previously treated as Cliff-2-territory. So the "Cliff 2 single-prompt at 50–60K is architectural" framing was too strong: on llama.cpp at this config, the cliff was **config-driven, not architectural** (the per-pass activation peak at `-ub 2048` was the actual bound; halving it to 1024 + the larger KV pool closes it). The vLLM Cliff 2 narrative above is unchanged — those configs hit a different kernel-level failure path. See `llamacpp/mtp` in [docs/SINGLE_CARD.md](SINGLE_CARD.md).
+
 ---
 
 ## vLLM pin compatibility status (master ships on v0.20 + Genesis v7.69 — 2026-05-02 PM)
@@ -522,7 +524,7 @@ This is why our launch frame is **two routes, not one**: vLLM dual-card for max 
 | Cap `max-model-len` at 48K (TQ3) | Cliff 1 (under threshold) | `docker-compose.yml` (default) |
 | FP8 KV + PN8 + cap at 75K | Cliff 1 (PN8 absorbs leak) | `tools-text.yml` |
 | TP=2 (dual-card) | Cliff 2 (state splits across cards) | `dual.yml`, `dual-turbo.yml` |
-| llama.cpp engine swap | Both (different library entirely) | `llamacpp/default`, `llamacpp/concurrent` |
+| llama.cpp engine swap | Both (different library entirely) | `llamacpp/default`, `llamacpp/mtp`, `llamacpp/mtp-vision` |
 
 ### Workarounds that don't work or are unavailable
 

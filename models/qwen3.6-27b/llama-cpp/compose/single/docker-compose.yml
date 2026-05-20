@@ -1,22 +1,34 @@
 # ===========================================================================
 # Profile (at-a-glance):
-#   Model:     Qwen3.6-27B (Unsloth Q3_K_XL GGUF)
-#   Engine:    llama.cpp (NOT vLLM — different engine, different memory model)
+#   Model:     Qwen3.6-27B (Unsloth Q3_K_XL GGUF, or MTP variant)
+#   Engine:    llama.cpp (local MTP-enabled build, build 9235)
 #   Topology:  Single 3090 (TP=1)
-#   Drafter:   none (vanilla llama.cpp; MTP via PR #22673 not adopted yet)
+#   Drafter:   none (MTP opt-in via MTP_ENABLED=1, requires MTP-enabled GGUF)
 #   KV:        q4_0 (4-bit packed)
-#   Vision:    yes (mmproj F16)
-#   Max ctx:   262K (full model native — no Cliff 1 / Cliff 2)
+#   Vision:    yes, also coexists with MTP (verified on build 9235)
+#   Max ctx:   262K vanilla / 131K MTP no-vision / 49K MTP + vision (q4_0 KV, Q4_K_M, 24 GB safe-headroom)
 #   Genesis:   N/A — llama.cpp engine; Genesis is vLLM/Qwen3-Next-specific
 #   Status:    ✅ Production
-#   Engine-profile: llama-cpp-mainline
+#   Engine-profile: llama-cpp-local
 #   Best for:  Bulletproof single-card path — slow decode (~21 TPS) but
-#              cliff-immune; recommended fallback when vLLM hits OOM at long ctx
+#              cliff-immune; MTP boosts to ~51/59 TPS (narr/code)
 # ---------------------------------------------------------------------------
 # Qwen3.6-27B on llama.cpp — single 3090, full 262K context, vision on.
 #
 # The "easy mode" path. No Genesis patches, no AutoRound, no patched vLLM
-# fork — just a stock llama.cpp Docker image and a single GGUF file.
+# fork — just a local llama.cpp Docker image and a single GGUF file.
+#
+# MTP spec-decode (--spec-type draft-mtp) supported. Set MTP_ENABLED=1 to
+# enable. Requires an MTP-enabled GGUF (e.g. unsloth/Qwen3.6-27B-MTP-GGUF).
+# When MTP is on:
+#   - --mmproj is RETAINED (vision + MTP coexist on build 9235 — sweep-verified
+#     2026-05-19; the older "strip mmproj" rule is obsolete)
+#   - --spec-draft-n-max ${MTP_DRAFT_N_MAX:-2} (2 is the sweet spot)
+#   - VRAM-safe ctx ceilings (Q4_K_M + q4_0 KV on 24GB, ~1.5 GB headroom):
+#       - no-vision: 131K  (set CTX_SIZE=131072)
+#       - vision:     49K  (set CTX_SIZE=49152)
+#     IMPORTANT: the default CTX_SIZE=262144 is sized for VANILLA (MTP off);
+#     when MTP_ENABLED=1, override CTX_SIZE explicitly or you will OOM.
 #
 # Showcase: vLLM single-card caps at 192K opt-in (with prefill caveats);
 # this hits 262K (the model's architectural max) on a stock 3090 thanks to
@@ -28,7 +40,7 @@
 #   - mmproj:  F16 (vision projector, ~0.8 GB)
 #   - Context: 262144 (model max)
 #   - KV:      q4_0 K + q4_0 V
-#   - Slots:   1 (single concurrent request; switch to single/concurrent.yml for 4)
+#   - Slots:   1 (single concurrent request; for MTP-accelerated profiles see mtp.yml / mtp-vision.yml)
 #   - FA:      on
 #
 # VRAM budget on 24 GB:
@@ -51,62 +63,84 @@
 #        MODEL_DIR=/your/models/dir docker compose up -d
 #   3. curl http://localhost:8020/v1/models  → should list the model.
 #
+# For MTP mode with an MTP-enabled GGUF:
+#        MTP_ENABLED=1 GGUF_FILE=qwen3.6-27b-gguf/unsloth-mtp-q4km/Qwen3.6-27B-Q4_K_M.gguf docker compose up -d
+#
 # Override defaults via .env or shell:
 #   MODEL_DIR              host dir to mount as /models  (default: ../../../../models-cache for repo, /path/to/your/models on your stack)
 #   GGUF_FILE              path under /models  (default: qwen3.6-27b-gguf/unsloth-q3kxl/Qwen3.6-27B-UD-Q3_K_XL.gguf)
 #   MMPROJ_FILE            path under /models  (default: qwen3.6-27b-gguf/mmproj-F16.gguf)
 #   CTX_SIZE               total KV pool       (default: 262144)
 #   BATCH_SIZE             llama.cpp -b        (default: 4096)
-#   UBATCH_SIZE            llama.cpp -ub       (default: 2048)
+#   UBATCH_SIZE            llama.cpp -ub       (default: 1024 — cliff-survival.
+#                          Lowered from 2048 after empirically establishing that
+#                          25K tool-prefill prompts OOM at -ub 2048 on single
+#                          card with 1.4-1.6 GB headroom. -ub 1024 halves the
+#                          per-pass activation peak. Override UBATCH_SIZE=2048
+#                          for raw prefill speed if no long-prompt workloads.)
 #   KV_TYPE                K and V quant type  (default: q4_0)
-#   REASONING_FORMAT       reasoning channel routing (default: none — for opencode/IDE-agent compat)
-#                          Override to `auto` to get separate `reasoning_content` field
-#                          (Qwen3.6 thinking trace) — useful for clients that render
-#                          reasoning_content (most don't). Issue: club-3090#97.
-#   DISABLE_THINKING       default: 1 (thinking OFF). Set to 0 to opt INTO thinking
-#                          which forces empty <think></think> blocks in responses. Useful for
-#                          clients (e.g. opencode) that display <think> content as the response.
-#                          Tradeoff: applies to ALL clients on this server — Hermes/agents that
-#                          use thinking lose reasoning capability. Issue: club-3090#97.
+#   MTP_ENABLED            set to 1 to enable MTP spec-decode (default: 0)
+#   MTP_DRAFT_N_MAX        number of MTP draft tokens (default: 2)
+#                         Requires MTP-enabled GGUF (see unsloth/Qwen3.6-27B-MTP-GGUF)
+#                         Disables vision (--mmproj); reduces max ctx
+#   REASONING              thinking gate (llama.cpp --reasoning, default: off).
+#                          Stack-wide Qwen3.6 policy is thinking-off-by-default
+#                          (matches the 22/24 vLLM composes shipping
+#                          chat_template_kwargs.enable_thinking=false). Set
+#                          REASONING=on to opt into thinking traces.
+#   REASONING_FORMAT       reasoning channel routing (default: deepseek — hygiene
+#                          even with thinking off, in case the model emits stray
+#                          tags). With REASONING=off no <think> is emitted, so
+#                          `content` is clean for opencode/IDE-agent clients
+#                          (closes the issue #97 hang cleanly without needing
+#                          `--reasoning-format none`).
 #   PORT                   host port           (default: 8020)
 #   CUDA_VISIBLE_DEVICES   which GPU to use    (default: 0)
 #
-# ─── opencode / IDE-agent compatibility (issue #97) ───
-# `--reasoning-format none` is the default because Qwen3.6's thinking mode
-# emits `<think>...</think>` blocks that llama.cpp's peg-native parser routes
-# to the OpenAI `reasoning_content` field by default. opencode (and most simple
-# OpenAI-compat clients) ignore `reasoning_content` and wait for `content`,
-# causing indefinite client hangs even though the server returns 200 cleanly.
-# `--reasoning-format none` collapses thinking into the content stream so all
-# clients work. Power users wanting reasoning_content separation: set
-# `REASONING_FORMAT=auto` in .env or shell.
+# ─── Thinking-off policy + opencode/IDE-agent compatibility (issue #97) ───
+# Qwen3.6 ships with thinking ON in its native chat template. The stack-wide
+# convention (already shipped on 22/24 vLLM composes) is thinking-off-by-
+# default. On llama.cpp the right lever is `--reasoning off` against the
+# *native* template — it correctly suppresses the <think> emission. We do NOT
+# mount the vLLM-only froggeric template here: froggeric has no llama.cpp
+# thinking-mode Jinja hook, so it silently suppresses `--reasoning off` and
+# forces thinking ON regardless. Native template + `--reasoning off` is the
+# correct llama.cpp interface and a superset of the old #97 `--reasoning-
+# format none` workaround: no <think> emitted → `content` is populated
+# directly → opencode + benchlocal-cli quality tests + Hermes all work.
 
 services:
   llama-cpp-qwen36-27b:
-    image: ghcr.io/ggml-org/llama.cpp:server-cuda
+    image: llama-cpp:local
     container_name: "${ESTATE_CONTAINER:-llama-cpp-qwen36-27b}"
     restart: unless-stopped
     ports:
       - "${ESTATE_PORT:-${PORT:-8020}}:8080"
     volumes:
       - "${MODEL_DIR:-../../../../../models-cache}:/models:ro"
+      # NOTE: NO chat-template mount. The native template embedded in the
+      # GGUF is the correct template for llama.cpp — it exposes the Qwen3.6
+      # thinking-mode Jinja gate that `--reasoning off` hooks into. The
+      # froggeric template (vLLM-only, vendored under vllm/patches/) is
+      # deliberately NOT mounted here: it has no llama.cpp thinking hook
+      # and silently suppressed `--reasoning off`, forcing thinking ON.
     entrypoint:
       - bash
       - -c
       - |
         set -e
-        # DISABLE_THINKING=1 (default) appends --chat-template-kwargs to disable
-        # Qwen3 thinking server-side. Forces the chat template to insert empty
-        # <think></think> blocks → output goes straight to the response. Useful for
-        # clients (e.g. opencode) that display <think> content as the response.
-        # Tradeoff: applies to ALL clients on this server instance — Hermes/agents that
-        # use thinking lose reasoning capability. See docs/HARDWARE.md and disc club-3090#97.
-        # Note: $$VAR is YAML-escape for $VAR (compose passes literal $ to bash).
         EXTRA_ARGS=()
-        if [ "$${DISABLE_THINKING:-1}" = "1" ]; then
-          EXTRA_ARGS+=("--chat-template-kwargs" '{"enable_thinking":false}')
-          echo "[entrypoint] DISABLE_THINKING=1 — chat template will produce empty <think></think>"
+
+        # MTP spec-decode toggle. We do NOT strip --mmproj anymore — MTP +
+        # vision coexist on build 9235 (sweep-verified 2026-05-19). Earlier
+        # composes stripped it defensively; that rule is obsolete.
+        MTP_VAL="$${MTP_ENABLED:-0}"
+        if [ "$$MTP_VAL" = "1" ]; then
+          EXTRA_ARGS+=("--spec-type" "draft-mtp")
+          EXTRA_ARGS+=("--spec-draft-n-max" "$${MTP_DRAFT_N_MAX:-2}")
+          echo "[entrypoint] MTP_ENABLED=1 — added --spec-type draft-mtp --spec-draft-n-max $${MTP_DRAFT_N_MAX:-2}"
         fi
+
         exec /app/llama-server "$$@" "$${EXTRA_ARGS[@]}"
       - --
     command:
@@ -123,7 +157,7 @@ services:
       - -b
       - ${BATCH_SIZE:-4096}
       - -ub
-      - ${UBATCH_SIZE:-2048}
+      - ${UBATCH_SIZE:-1024}
       - -ngl
       - "99"
       - -fa
@@ -134,9 +168,19 @@ services:
       - ${KV_TYPE:-q4_0}
       - -np
       - "1"
+      # Native GGUF chat template (no --chat-template-file). Thinking-off
+      # via --reasoning (modern llama.cpp lever) on the native template's
+      # Qwen3.6 thinking_mode gate. --reasoning-format kept on `deepseek`
+      # as hygiene — with REASONING=off the model emits no <think>, so
+      # `content` is clean for all clients (incl. opencode, #97 obsolete).
       - --jinja
+      - --reasoning
+      - ${REASONING:-off}
       - --reasoning-format
-      - ${REASONING_FORMAT:-none}
+      - ${REASONING_FORMAT:-deepseek}
+    environment:
+      - MTP_ENABLED=${MTP_ENABLED:-0}
+      - MTP_DRAFT_N_MAX=${MTP_DRAFT_N_MAX:-2}
     deploy:
       resources:
         reservations:

@@ -243,7 +243,7 @@ the §1 confidently-wrong outcome the design forbids.
 | `[D]`-emittable required | yes — reuses `[D]`'s scope-gate (`engine.type==vllm` ∧ `profile_runtime` entry exists ∧ `genesis_equipped==false`); a Genesis/TQ3 profile (`vllm/dual-turbo`) → stratum-2 `profile-not-emittable` (g0) | no |
 | `weights_variant` compat | Path-A only (`[C0]` checks the curated variant against arch constraints) | n/a — uses deriver-resolved `weight_format`/quant |
 | `drafter` | from the curated profile | `none` for non-curated (drafter profiles expose `model_compat`, not arch-compat) |
-| Non-vLLM `--profile-like` | refused stratum-2 `unsupported-runtime-engine` (g13: `llamacpp/default`, `engine=llama-cpp-mainline`, `mem_util=None`) | same — refused on both paths |
+| Non-vLLM `--profile-like` | refused stratum-2 `unsupported-runtime-engine` (g13: `llamacpp/default`, `engine=llama-cpp-local`, `mem_util=None`) | same — refused on both paths |
 
 ---
 

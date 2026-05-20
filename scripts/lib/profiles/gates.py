@@ -191,7 +191,7 @@ def stratum2_profile_like(
 
     Both paths: the named profile's `engine.type` must be `vllm` else
     structured refuse `unsupported-runtime-engine` (covers
-    `llamacpp/default` engine=`llama-cpp-mainline`, mem_util=None).
+    `llamacpp/default` engine=`llama-cpp-local`, mem_util=None).
 
     Path A additionally:
       - the profile must be `[D]`-emittable: REUSE `[D]`'s scope-gate

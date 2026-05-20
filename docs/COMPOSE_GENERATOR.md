@@ -87,7 +87,7 @@ $ scripts/generate-compose.sh --profile vllm/dual-tq3-mtp
 generation is permanently out of scope -> refuse
 
 $ scripts/generate-compose.sh --profile llamacpp/default
-[generate-compose] REFUSE: engine llama-cpp-mainline type='llama.cpp' != vllm;
+[generate-compose] REFUSE: engine llama-cpp-local type='llama.cpp' != vllm;
 the #141 generator is non-Genesis vLLM only -> refuse (out of scope)
 ```
 

@@ -105,7 +105,7 @@ check(
 # ---------------------------------------------------------------------------
 # STRATUM 2
 # ---------------------------------------------------------------------------
-# non-vLLM --profile-like (llamacpp/default, engine=llama-cpp-mainline) ->
+# non-vLLM --profile-like (llamacpp/default, engine=llama-cpp-local) ->
 # unsupported-runtime-engine (both paths) before [C0]/[B].
 s2_llama = G.stratum2_profile_like("llamacpp/default", path="B")
 check(

@@ -150,7 +150,7 @@ PY
 run_test "C4 engine KV support: llama.cpp rejects bf16 KV" <<'PY'
 from scripts.lib.profiles.compat import load_profiles, fits
 p = load_profiles()
-r = fits([p.hardware["rtx-3090"]], p.models["qwen3.6-27b"], p.workloads["long-ctx-single"], p.engines["llama-cpp-mainline"], kv_format="bf16", weights_variant="gguf", tp=1, project_vram=False)
+r = fits([p.hardware["rtx-3090"]], p.models["qwen3.6-27b"], p.workloads["long-ctx-single"], p.engines["llama-cpp-local"], kv_format="bf16", weights_variant="gguf", tp=1, project_vram=False)
 assert not r.valid
 assert any(reason.startswith("C4:") for reason in r.reasons), r.reasons
 PY
@@ -210,7 +210,7 @@ PY
 run_test "C10 model family support rejected" <<'PY'
 from scripts.lib.profiles.compat import load_profiles, fits
 p = load_profiles()
-r = fits([p.hardware["rtx-3090"]], p.models["gemma-4-31b"], p.workloads["long-ctx-single"], p.engines["llama-cpp-mainline"], kv_format="q4_0", tp=1, project_vram=False)
+r = fits([p.hardware["rtx-3090"]], p.models["gemma-4-31b"], p.workloads["long-ctx-single"], p.engines["llama-cpp-local"], kv_format="q4_0", tp=1, project_vram=False)
 assert not r.valid
 assert any(reason.startswith("C10:") for reason in r.reasons), r.reasons
 PY
@@ -244,7 +244,7 @@ PY
 run_test "C12 skipped for non-vLLM engines" <<'PY'
 from scripts.lib.profiles.compat import load_profiles, fits
 p = load_profiles()
-r = fits([p.hardware["rtx-3090"]], p.models["qwen3.6-27b"], p.workloads["long-ctx-single"], p.engines["llama-cpp-mainline"], kv_format="q4_0", weights_variant="gguf", tp=1)
+r = fits([p.hardware["rtx-3090"]], p.models["qwen3.6-27b"], p.workloads["long-ctx-single"], p.engines["llama-cpp-local"], kv_format="q4_0", weights_variant="gguf", tp=1)
 assert r.valid, r.reasons
 assert "C12" in r.diagnostics["constraints_skipped"]
 assert r.diagnostics["kv_calc_invoked"] is False
@@ -261,7 +261,7 @@ PY
 run_test "C14 explicit unsupported weight variant rejected" <<'PY'
 from scripts.lib.profiles.compat import load_profiles, fits
 p = load_profiles()
-r = fits([p.hardware["rtx-3090"]], p.models["qwen3.6-27b"], p.workloads["long-ctx-single"], p.engines["llama-cpp-mainline"], kv_format="q4_0", weights_variant="autoround_int4", tp=1, project_vram=False)
+r = fits([p.hardware["rtx-3090"]], p.models["qwen3.6-27b"], p.workloads["long-ctx-single"], p.engines["llama-cpp-local"], kv_format="q4_0", weights_variant="autoround_int4", tp=1, project_vram=False)
 assert not r.valid
 assert any(reason.startswith("C14:") for reason in r.reasons), r.reasons
 PY
@@ -277,7 +277,7 @@ PY
 run_test "weight fallthrough: Qwen llama.cpp resolves GGUF" <<'PY'
 from scripts.lib.profiles.compat import load_profiles, fits
 p = load_profiles()
-r = fits([p.hardware["rtx-3090"]], p.models["qwen3.6-27b"], p.workloads["long-ctx-single"], p.engines["llama-cpp-mainline"], kv_format="q4_0", tp=1, project_vram=False)
+r = fits([p.hardware["rtx-3090"]], p.models["qwen3.6-27b"], p.workloads["long-ctx-single"], p.engines["llama-cpp-local"], kv_format="q4_0", tp=1, project_vram=False)
 assert r.valid, r.reasons
 assert r.weights_variant == "gguf"
 PY
@@ -422,7 +422,7 @@ from scripts.lib.profiles.compat import load_profiles, InstanceSpec, validate_es
 p = load_profiles()
 instances = [
     InstanceSpec("llama-a", "llamacpp/default", (0,), 8020),
-    InstanceSpec("llama-b", "llamacpp/concurrent", (1,), 8021),
+    InstanceSpec("llama-b", "llamacpp/mtp", (1,), 8021),
 ]
 r = validate_estate(instances, [p.hardware["rtx-3090"], p.hardware["rtx-3090"]], p, nvlink_active=False)
 assert r.valid, (r.cross_instance_failures, {k: v.reasons for k, v in r.per_instance.items()})

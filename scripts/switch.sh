@@ -41,7 +41,8 @@
 #
 #   Single-card llama.cpp:
 #     llamacpp/default      Q3_K_XL + 262K + q4_0 KV + vision (max ctx, no cliffs)
-#     llamacpp/concurrent   Q3_K_XL + 192K pool + 4 parallel slots + vision
+#     llamacpp/mtp          Q4_K_M MTP + 131K + q4_0 KV (fast: ~60 TPS code; no vision)
+#     llamacpp/mtp-vision   Q4_K_M MTP + 49K + q4_0 KV + mmproj (fast + multimodal)
 #
 # Env overrides (rarely needed):
 #   COMPOSE_BIN     Default: "docker compose" (set to e.g. "podman compose" if needed)

@@ -39,7 +39,9 @@ Five recommended options on Genesis v7.69 + vllm#35975 backport (2026-05-02 PM):
 | **Long ctx, text-only — Balanced MTP** ⭐ (RAG, codebase, IDE agents, default) | [`long-text.yml`](../models/qwen3.6-27b/vllm/compose/single/long-text.yml) | **180K** | 50 / 67 | ~22.3 GB (mem-util 0.93) |
 | **Long ctx, text-only — Max-context** (long single-shot RAG / codebase analysis) | [`long-text-no-mtp.yml`](../models/qwen3.6-27b/vllm/compose/single/long-text-no-mtp.yml) (NEW) | **200K** | TBD/TBD (slow decode, no MTP) | ~21.0 GB (mem-util 0.95) |
 | **Bounded thinking** (coding agents, structured-CoT — recommended grammar: DeepSeek scratchpad, 87.4% combined HE+/LCB v6) — see [STRUCTURED_COT.md](STRUCTURED_COT.md) | [`bounded-thinking.yml`](../models/qwen3.6-27b/vllm/compose/single/bounded-thinking.yml) | **180K** | 50 / 66 | ~21.7 GB (mem-util 0.95) |
-| **Bulletproof, no cliffs** (production service, unpredictable inputs) | [`llamacpp/default`](../models/qwen3.6-27b/llama-cpp/compose/docker-compose.yml) | **262K** | 21 / 21 | ~20 GB |
+| **Bulletproof, no cliffs** (production service, unpredictable inputs) | [`llamacpp/default`](../models/qwen3.6-27b/llama-cpp/compose/single/docker-compose.yml) | **262K** | 21 / 21 | ~20 GB |
+| **llama.cpp + MTP, fast + long ctx** ⭐ (IDE agents, opencode, Hermes, long-multi-turn agentic) | [`llamacpp/mtp`](../models/qwen3.6-27b/llama-cpp/compose/single/mtp.yml) | **131K** | **51 / 60** | ~22.5 GB |
+| **llama.cpp + MTP + vision** (multimodal chat, screenshot-debugging, vision-aware review) | [`llamacpp/mtp-vision`](../models/qwen3.6-27b/llama-cpp/compose/single/mtp-vision.yml) | **49K** | **57 / 66** | ~20.5 GB |
 | **Small-context vLLM safe path** ([@stiggy2k16](https://github.com/noonghunna/club-3090/issues/43) data point) — IDE agents capped at <60K accumulated, when you need vLLM speed but llama.cpp is too slow | [`minimal.yml`](../models/qwen3.6-27b/vllm/compose/single/minimal.yml) at `--gpu-memory-utilization 0.95 --max-model-len 65536` | **64K** | ~32 / ~33 (no MTP) | ~22.4 GB |
 
 Run via `bash scripts/launch.sh` (interactive) or `bash scripts/switch.sh <variant>`.
@@ -114,6 +116,18 @@ For the cross-card TP=2 picture, see [`DUAL_CARD.md`](DUAL_CARD.md).
 **Workload:** production service for unpredictable users. Inputs that might be 5K or might be 200K. Tool returns that might be 1K or might be 50K. Anywhere "predictable behavior" beats "peak TPS."
 
 `bash scripts/switch.sh llamacpp/default`. Q3_K_XL (Unsloth dynamic) + q4_0 KV at 262K + vision (mmproj). Different attention library entirely (ggml-cuda, not FA2) → no Cliff 1 mechanism, no Cliff 2 mechanism. Trade is ~21 TPS (~2.5× slower than vLLM). Quant validated by [Benjamin Marie's Kaitchup eval](https://kaitchup.substack.com/p/summary-of-qwen36-gguf-evals-updating).
+
+### llama.cpp + MTP, fast + long ctx — `llamacpp/mtp` ⭐
+
+**Workload:** IDE agents (opencode, Cline), Hermes, multi-turn agentic. The single-card sweet spot for "fast enough + plenty of context + bulletproof."
+
+`bash scripts/switch.sh llamacpp/mtp`. Q4_K_M MTP-enabled GGUF (`unsloth/Qwen3.6-27B-MTP-GGUF`) + q4_0 KV + MTP `n=2` + `-ub 1024`. Mainline llama.cpp build 9235 (PR #22673 MTP merged). **~51 narr / ~60 code TPS** — ~2.5× faster than `llamacpp/default`, only marginally slower than vLLM single-card paths *and* without the cliffs. **Quality 102/150 (68%) on the 8-pack matrix beats every Qwen vLLM dual config in [#119](https://github.com/noonghunna/club-3090/discussions/119)**; **aider-polyglot 17/30 exactly matches Qwen vLLM bf16 dual on half the hardware**. **Verify-stress 7/7** including 60K + 91K needle recall — the Cliff 2 narrative is **config-driven, not architectural**: at this config the model walks past 91K cleanly on a single 3090. No vision (mmproj cost trades against KV pool); for multimodal, use `llamacpp/mtp-vision` below.
+
+### llama.cpp + MTP + vision — `llamacpp/mtp-vision`
+
+**Workload:** multimodal chat, screenshot-debugging, vision-aware code review, UI-screenshot agents. The first stack profile combining MTP + vision on a single 3090 (the older "strip mmproj when MTP" rule was obsolete on build 9235 — sweep-verified 2026-05-19).
+
+`bash scripts/switch.sh llamacpp/mtp-vision`. Same Q4_K_M MTP GGUF + q4_0 KV + MTP `n=2` + `-ub 1024`, **with `--mmproj mmproj-F16.gguf` mounted**. Ctx 49K (vision overhead trades against KV pool — 49K is the safe-headroom max with mmproj on 24 GB). **~57 narr / ~66 code TPS** (text path), vision overhead paid once at image-encode, not per decoded token. Verify-stress 7/7 at this config.
 
 ---
 

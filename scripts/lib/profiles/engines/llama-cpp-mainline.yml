@@ -1,11 +1,11 @@
 schema_version: 1
-id: llama-cpp-mainline
-display_name: llama.cpp mainline CUDA server
+id: llama-cpp-local
+display_name: llama.cpp local CUDA server (MTP-enabled)
 type: llama.cpp
 stability: stable
 install:
   method: docker_image
-  spec: ghcr.io/ggml-org/llama.cpp:server-cuda
+  spec: llama-cpp:local
 min_sm: 6.0
 supported_model_families:
   - qwen3-next-hybrid
@@ -15,11 +15,12 @@ supported_kv_formats:
   - q5_0
   - q8_0
   - k8v4
-supported_drafters: []
+supported_drafters:
+  - mtp
 supported_weight_formats:
   - gguf
 required_overlays: []
 vendored_overlays: []
 required_genesis: false
-notes: "Cliff-immune single-card fallback for Qwen GGUF serving."
+notes: "Cliff-immune single-card fallback for Qwen GGUF serving. Built from ggerganov/llama.cpp @ d14ce3dab (MTP PR #22673)."
 
