@@ -39,8 +39,26 @@
 #
 # Why 49K ctx (vs mtp.yml's 131K): the mmproj F16 plus image-encode tile
 # buffers consume the headroom that the no-vision profile spends on KV.
-# 49K is the safe-headroom ceiling sweep-verified at this config; pushing
-# higher risks OOM on the first vision request.
+# 49K is the safe-headroom DEFAULT — conservative so it boots cleanly across
+# varied single-3090 rigs (desktop/driver/WSL overhead differs).
+#
+# ⭐ NEED MORE CONTEXT WITH VISION? Drop the micro-batch to free KV budget:
+#
+#     UBATCH_SIZE=512 CTX_SIZE=196608 docker compose -f mtp-vision.yml up -d
+#     # or:  UBATCH_SIZE=512 CTX_SIZE=196608 bash scripts/switch.sh llamacpp/mtp-vision
+#
+#   `-ub 512` frees ~1 GB to the KV pool → up to 4× the context (49K → 192K)
+#   WITH vision still loaded. Trade-off: ~10% slower PREFILL (more, smaller
+#   micro-batches); DECODE TPS is unaffected. It's also MORE cliff-safe, not
+#   less — smaller -ub lowers the per-pass activation peak (verify-stress 7/7
+#   incl. the 91K needle at this config). Surfaced by @JensJN in disc #170;
+#   see docs/SINGLE_CARD.md + the llama-cpp README "Speed vs Context" section.
+#
+#   ⚠ Always run `bash scripts/verify-stress.sh` at your chosen CTX_SIZE to
+#   confirm needle recall + no boot-OOM on YOUR rig before relying on it —
+#   192K is rig-validated but headroom varies (driver/desktop overhead).
+#   We keep the DEFAULT conservative at 49K because the optimal -ub is
+#   workload-conditional: context-heavy → 512, speed/prefill-heavy → 1024.
 #
 # Quick start:
 #   1. Get the MTP-enabled GGUF + the vision projector:
@@ -56,9 +74,9 @@
 #   MODEL_DIR              host dir to mount as /models
 #   GGUF_FILE              path under /models  (default: …unsloth-mtp-q4km/Qwen3.6-27B-Q4_K_M.gguf)
 #   MMPROJ_FILE            path under /models  (default: qwen3.6-27b-gguf/mmproj-F16.gguf)
-#   CTX_SIZE               KV pool size        (default: 49152 — safe-headroom max with vision)
+#   CTX_SIZE               KV pool size        (default: 49152 — conservative; up to 196608 with UBATCH_SIZE=512, see "NEED MORE CONTEXT" above)
 #   BATCH_SIZE             llama.cpp -b        (default: 4096)
-#   UBATCH_SIZE            llama.cpp -ub       (default: 1024 — cliff-survival)
+#   UBATCH_SIZE            llama.cpp -ub       (default: 1024 — cliff-survival; set 512 to 4× the ctx ceiling, ~10% prefill cost)
 #   KV_TYPE                K and V quant type  (default: q4_0)
 #   MTP_DRAFT_N_MAX        MTP draft tokens    (default: 2)
 #   REASONING              thinking gate       (default: off)
