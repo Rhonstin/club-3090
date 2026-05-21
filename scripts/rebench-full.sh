@@ -269,7 +269,7 @@ URL="$URL" MODEL="$MODEL" \
 # --- step 3: quality-test --full --------------------------------------------
 URL="$URL" MODEL="$MODEL" \
   run_step quality-full "$OUT_DIR/quality-full.log" \
-    bash "$ROOT_DIR/scripts/quality-test.sh" --full
+    bash "$ROOT_DIR/scripts/quality-test.sh" --full --sandbox-log-dir "$OUT_DIR"
 snapshot_quality_json "$OUT_DIR/quality-full.json"
 
 # --- step 4: soak-test ------------------------------------------------------
@@ -290,7 +290,7 @@ AIDER_TIMEOUT_PER_CASE="${AIDER_TIMEOUT_PER_CASE:-3600}"
 URL="$URL" MODEL="$MODEL" \
   run_step aider-polyglot "$OUT_DIR/aider-polyglot.log" \
     bash "$ROOT_DIR/scripts/quality-test.sh" --pack aider-polyglot-30 \
-      --timeout-per-case "$AIDER_TIMEOUT_PER_CASE"
+      --timeout-per-case "$AIDER_TIMEOUT_PER_CASE" --sandbox-log-dir "$OUT_DIR"
 snapshot_quality_json "$OUT_DIR/aider-polyglot.json"
 
 # --- final GPU state snapshot ----------------------------------------------

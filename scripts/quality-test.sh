@@ -62,6 +62,11 @@ OPTIONS (extra)
                    Pass through to benchlocal-cli as --timeout-per-case N
                    (seconds). Default: 60. For aider-polyglot-30 on low-power
                    single-card rigs, bump to 3600+ to avoid mid-batch kills.
+  --sandbox-log-dir DIR
+                   Capture each sandboxed pack's container log to
+                   DIR/sandbox-<pack_id>.log before teardown (forwarded to
+                   benchlocal-cli). Without it, sandbox logs are lost on
+                   container cleanup. Also settable via SANDBOX_LOG_DIR env.
 
 ENV VARS
   URL              Endpoint base URL (default: auto-detected via preflight,
@@ -122,6 +127,7 @@ PACK=""
 NO_SANDBOX=0
 SANDBOXED_ONLY=0
 LIST_PACKS=0
+SANDBOX_LOG_DIR="${SANDBOX_LOG_DIR:-}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -157,6 +163,14 @@ while [[ $# -gt 0 ]]; do
     --list-packs)
       LIST_PACKS=1
       shift
+      ;;
+    --sandbox-log-dir)
+      SANDBOX_LOG_DIR="${2:-}"
+      if [[ -z "$SANDBOX_LOG_DIR" ]]; then
+        echo "✗ --sandbox-log-dir requires a directory" >&2
+        exit 2
+      fi
+      shift 2
       ;;
     --timeout-per-case)
       TIMEOUT_PER_CASE="${2:-}"
@@ -274,6 +288,12 @@ else
 fi
 if [[ "$NO_SANDBOX" == "1" && "$SANDBOXED_ONLY" != "1" ]]; then
   CLI_ARGS+=(--no-sandboxed-packs)
+fi
+# Capture each sandboxed pack's container log before teardown (else it's lost).
+if [[ -n "$SANDBOX_LOG_DIR" ]]; then
+  mkdir -p "$SANDBOX_LOG_DIR"
+  CLI_ARGS+=(--sandbox-log-dir "$SANDBOX_LOG_DIR")
+  echo "[quality-test] sandbox logs → ${SANDBOX_LOG_DIR}/sandbox-<pack>.log"
 fi
 
 # Run; capture exit code so we can also try to emit the compact one-liner
