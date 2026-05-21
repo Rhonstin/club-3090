@@ -409,6 +409,31 @@ See [issue #137](https://github.com/noonghunna/club-3090/issues/137) for a worke
 
 ---
 
+## Note for AMD platforms (Threadripper / Ryzen / EPYC) — IOMMU faults under sustained TP=2
+
+On AMD hosts with the IOMMU in the default **AMD-Vi "Translated"** mode, sustained TP=2 inference can drive **both GPUs into `Xid 154` fatal MMU faults** ("GPU recovery action: Node Reboot Required"). The crashes are intermittent and surface with *misleading* symptoms — a `tokenizers` Rust segfault (`free(): invalid next size`), a Triton CUDA "unspecified launch failure" mid `verify-stress`, etc. — but the kernel log shows the real cause:
+
+```
+nvidia 0000:09:00.0: AMD-Vi: Event logged [IO_PAGE_FAULT domain=... ]
+NVRM: Xid (PCI:0000:09:00): 154, GPU recovery action: Node Reboot Required
+```
+
+Under sustained TP=2 DMA the per-device IOMMU page-table translation can't keep up and faults; the tokenizer / libc crashes are CPU-side collateral from the same instability.
+
+**Fix:** add **`iommu=pt`** (passthrough) to the kernel command line. Device DMA bypasses page-table translation while the IOMMU stays enabled (security boundaries + PCIe grouping preserved). After a clean reboot the full `report.sh --full` chain — including the 60K/90K Cliff-2 needles and continuous soak — passes with zero AMD-Vi events. No-op on Intel hosts.
+
+**Triage** — random crashes under sustained load on an AMD platform:
+
+```bash
+dmesg | grep -E "AMD-Vi.*IO_PAGE_FAULT|Xid.*154"
+```
+
+Any hits → try `iommu=pt`. (IOMMU enabled but in passthrough is also the recommended mode for GPU-passthrough VMs — see [CONTAINER_RUNTIMES.md](CONTAINER_RUNTIMES.md).)
+
+Reported + diagnosed by [@mgabor3141](https://github.com/noonghunna/club-3090/issues/178#issuecomment-4509363017) (X399 + Threadripper 1950X + 2× 3090, bare metal).
+
+---
+
 ## Note for WSL2 / Windows users
 
 ### GPU memory budget on WSL2

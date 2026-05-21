@@ -315,6 +315,16 @@ SOAK_MODE=continuous SOAK_SESSIONS=5 SOAK_TURNS=5 \
 
 **Why this happens** (one-paragraph): the GDN forward kernel holds ~500 MiB of simultaneous intermediate tensors at T=4128 prefill chunks. With accumulated multi-turn KV cache (~5 GiB at 25K context) + model weights (14 GiB) + MTP draft (5 GiB) + other workspace, the per-card peak exceeds the 24 GiB ceiling. The fix is rewriting the kernel to stream those intermediates segment-by-segment instead of holding them simultaneously — that's upstream work in `vllm/model_executor/layers/fla/ops/` or via Genesis sidecar. Detailed mechanism analysis in [`docs/CLIFFS.md`](CLIFFS.md) "Why TP=2 escapes" and "Why llama.cpp escapes" sections.
 
+### Random crashes under sustained load on an AMD platform (Threadripper / Ryzen / EPYC)?
+
+Intermittent crashes during long runs — a `tokenizers` Rust segfault (`free(): invalid next size`), a Triton "unspecified launch failure", or both GPUs dropping out at once — are often the **AMD-Vi IOMMU** faulting under sustained TP=2 DMA, not a model bug. Check the kernel log:
+
+```bash
+dmesg | grep -E "AMD-Vi.*IO_PAGE_FAULT|Xid.*154"
+```
+
+If you see `AMD-Vi … IO_PAGE_FAULT` + `Xid … 154`, add **`iommu=pt`** to your kernel command line — the IOMMU stays on (isolation / PCIe grouping intact) but device DMA bypasses page-table translation, which clears it. No-op on Intel. Full writeup + kernel-log signature in [HARDWARE.md](HARDWARE.md) ("Note for AMD platforms"). Diagnosed by @mgabor3141 ([#178](https://github.com/noonghunna/club-3090/issues/178)).
+
 ## Troubleshooting ladder — boot the simplest stack first
 
 If you're hitting boot OOMs, weird MTP behavior, or memory-budget issues
