@@ -341,7 +341,7 @@ check_thinking() {
 import sys, json
 d = json.load(sys.stdin)
 msg = d['choices'][0]['message']
-reasoning = msg.get('reasoning') or ''
+reasoning = msg.get('reasoning') or msg.get('reasoning_content') or ''
 content = msg.get('content') or ''
 finish = d['choices'][0].get('finish_reason')
 print(f'{len(reasoning)}|{len(content)}|{finish}|{(reasoning[:60] or \"(empty)\").replace(chr(10), \" \")}|{(content[:60] or \"(empty)\").replace(chr(10), \" \")}')
