@@ -875,7 +875,11 @@ suggest_default_variant() {
     elif (( cards >= 2 )); then
       echo "vllm/dual"
     else
-      echo "vllm/long-text"
+      # Single card: llamacpp/default is the recommended path — full 262K, cliff-immune,
+      # and no purged-nightly dependency. The old vllm/long-text suggestion is dead
+      # (#167 image purge + single-card Cliff 2b); vLLM single-card users can still pick
+      # vllm/tools-text explicitly.
+      echo "llamacpp/default"
     fi
   else
     if (( cards >= 2 )); then echo "vllm/gemma-mtp"; else echo "vllm/gemma-mtp-tp1"; fi
