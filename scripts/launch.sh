@@ -227,7 +227,7 @@ declare -A LAUNCH_VARIANT_COMPOSE=(
   [vllm/gemma-mtp]="models/gemma-4-31b/vllm/compose/dual/docker-compose.yml"
   [vllm/gemma-mtp-tp1]="models/gemma-4-31b/vllm/compose/single/docker-compose.yml"
   [vllm/gemma-dflash]="models/gemma-4-31b/vllm/compose/dual/dflash.yml"
-  [llamacpp/default]="models/qwen3.6-27b/llama-cpp/compose/single/docker-compose.yml"
+  [llamacpp/default]="models/qwen3.6-27b/llama-cpp/compose/single/mtp.yml"
   [llamacpp/mtp]="models/qwen3.6-27b/llama-cpp/compose/single/mtp.yml"
   [llamacpp/mtp-vision]="models/qwen3.6-27b/llama-cpp/compose/single/mtp-vision.yml"
 )

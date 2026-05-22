@@ -6,7 +6,7 @@
 #   Drafter:   MTP n=2 (--spec-type draft-mtp, sweet spot — see BENCHMARKS.md)
 #   KV:        q4_0 K + q4_0 V (densest mainline, Ampere-fast)
 #   Vision:    no (mmproj NOT mounted — for vision, see mtp-vision.yml)
-#   Max ctx:   131072 (safe-headroom max on 24 GB; sweep-verified)
+#   Max ctx:   131072 default; full native 262144 reachable with -ub 512 (see CTX_SIZE note)
 #   Genesis:   N/A — llama.cpp engine; Genesis is vLLM/Qwen3-Next-specific
 #   Status:    ✅ Production
 #   Engine-profile: llama-cpp-local
@@ -16,10 +16,12 @@
 # ---------------------------------------------------------------------------
 # Qwen3.6-27B on llama.cpp — single 3090, MTP, 131K ctx, no vision.
 #
-# This is one of three named single-card profiles for this model:
-#   - docker-compose.yml  → vanilla 262K + vision, cliff-immune fallback
-#   - mtp.yml             → MTP n=2 + 131K + no vision (THIS file — fast + ctx)
-#   - mtp-vision.yml      → MTP n=2 + 49K + vision (multimodal + fast)
+# This is one of TWO named single-card profiles for this model (collapsed from
+# three on 2026-05-22 — the old vanilla Q3_K_XL `docker-compose.yml` was retired
+# once Q4_K_M was shown to reach the full 262K too; see the CTX_SIZE note below):
+#   - mtp.yml         → MTP n=2 + no vision (THIS file). `llamacpp/default`
+#                       is now an ALIAS for this profile.
+#   - mtp-vision.yml  → MTP n=2 + vision (multimodal)
 #
 # Why no vision here: mmproj F16 costs ~0.8 GB. Without it the MTP-safe ctx
 # ceiling jumps from ~49K to 131K (sweep-verified 2026-05-19 on build 9235).
@@ -60,7 +62,11 @@
 # Override defaults via .env or shell:
 #   MODEL_DIR              host dir to mount as /models  (default: ../../../../../models-cache)
 #   GGUF_FILE              path under /models  (default: qwen3.6-27b-gguf/unsloth-mtp-q4km/Qwen3.6-27B-Q4_K_M.gguf)
-#   CTX_SIZE               KV pool size        (default: 131072 — safe-headroom max)
+#   CTX_SIZE               KV pool size        (default: 131072 — safe-headroom).
+#                          ⭐ FULL 262K: CTX_SIZE=262144 UBATCH_SIZE=512 → boots ~23 GB,
+#                          MTP active, verify-stress 7/7 (validated 2026-05-22). The
+#                          smaller -ub shrinks the compute buffer to fund the 2× KV.
+#                          Default stays 131K/-ub 1024 for cross-rig headroom.
 #   BATCH_SIZE             llama.cpp -b        (default: 4096)
 #   UBATCH_SIZE            llama.cpp -ub       (default: 1024 — cliff-survival)
 #   KV_TYPE                K and V quant type  (default: q4_0)

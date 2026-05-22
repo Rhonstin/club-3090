@@ -74,9 +74,11 @@
 #   MODEL_DIR              host dir to mount as /models
 #   GGUF_FILE              path under /models  (default: …unsloth-mtp-q4km/Qwen3.6-27B-Q4_K_M.gguf)
 #   MMPROJ_FILE            path under /models  (default: qwen3.6-27b-gguf/mmproj-F16.gguf)
-#   CTX_SIZE               KV pool size        (default: 49152 — conservative; up to 196608 with UBATCH_SIZE=512, see "NEED MORE CONTEXT" above)
-#   BATCH_SIZE             llama.cpp -b        (default: 4096)
-#   UBATCH_SIZE            llama.cpp -ub       (default: 1024 — cliff-survival; set 512 to 4× the ctx ceiling, ~10% prefill cost)
+#   IMAGE_MIN_TOKENS       min tokens / image  (default: 1024 — matches ik vision profile)
+#   IMAGE_MAX_TOKENS       max tokens / image  (default: 4096 = ~4M px / 2048²; lower → more ctx room)
+#   CTX_SIZE               KV pool size        (default: 163840 = 160K @ -ub 512; full-res 2048² image validated @ ~22.2 GB / 24, 2026-05-22. ~196K feasible w/ smaller -ub)
+#   BATCH_SIZE             llama.cpp -b        (default: 4096 — on mainline -b does NOT drive VRAM; -ub does)
+#   UBATCH_SIZE            llama.cpp -ub       (default: 512 — the VRAM lever on mainline; funds the 160K ctx + encode buffer)
 #   KV_TYPE                K and V quant type  (default: q4_0)
 #   MTP_DRAFT_N_MAX        MTP draft tokens    (default: 2)
 #   REASONING              thinking gate       (default: off)
@@ -98,9 +100,11 @@ services:
       --port 8080
       -m /models/${GGUF_FILE:-qwen3.6-27b-gguf/unsloth-mtp-q4km/Qwen3.6-27B-Q4_K_M.gguf}
       --mmproj /models/${MMPROJ_FILE:-qwen3.6-27b-gguf/mmproj-F16.gguf}
-      -c ${CTX_SIZE:-49152}
+      --image-min-tokens ${IMAGE_MIN_TOKENS:-1024}
+      --image-max-tokens ${IMAGE_MAX_TOKENS:-4096}
+      -c ${CTX_SIZE:-163840}
       -b ${BATCH_SIZE:-4096}
-      -ub ${UBATCH_SIZE:-1024}
+      -ub ${UBATCH_SIZE:-512}
       -ngl 99
       -fa on
       --cache-type-k ${KV_TYPE:-q4_0}

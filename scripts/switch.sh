@@ -40,8 +40,8 @@
 #     vllm/gemma-mtp        Gemma-4-31B + Google MTP drafter (32K, bf16 KV, vision — community/experimental, pre-merge)
 #
 #   Single-card llama.cpp:
-#     llamacpp/default      Q3_K_XL + 262K + q4_0 KV + vision (max ctx, no cliffs)
-#     llamacpp/mtp          Q4_K_M MTP + 131K + q4_0 KV (fast: ~60 TPS code; no vision)
+#     llamacpp/default      alias for llamacpp/mtp (Q4_K_M MTP, no vision)
+#     llamacpp/mtp          Q4_K_M MTP + 131K (full 262K via -ub 512) + q4_0 KV (fast ~60 TPS code; no vision; cliff-immune)
 #     llamacpp/mtp-vision   Q4_K_M MTP + 49K + q4_0 KV + mmproj (fast + multimodal)
 #
 # Env overrides (rarely needed):
