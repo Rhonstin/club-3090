@@ -60,12 +60,23 @@ done
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
+# Pick up a saved MODEL_DIR (and other config) from the repo .env — same as
+# launch.sh / switch.sh, and what setup.sh writes there. An explicit exported
+# MODEL_DIR still wins. This makes the Disk section report the user's real
+# models path instead of falling back to the hardcoded mount below.
+if [[ -z "${MODEL_DIR:-}" && -f "${REPO_ROOT}/.env" ]]; then
+  # shellcheck disable=SC1091
+  source "${REPO_ROOT}/.env"
+fi
+
 HOST_SHORT="$(hostname -s 2>/dev/null || echo unknown)"
 USER_NAME="${USER:-$(whoami 2>/dev/null || echo unknown)}"
 
 redact() {
   if [[ $REDACT -eq 1 ]]; then
-    sed \
+    # Mask the literal MODEL_DIR value first (if exported) so an arbitrary models
+    # path — /data/..., /srv/... — is caught before the prefix rules below.
+    { if [[ -n "${MODEL_DIR:-}" ]]; then sed -e "s|${MODEL_DIR}|<MODEL_DIR>|g"; else cat; fi; } | sed \
       -e "s|/home/${USER_NAME}|~|g" \
       -e "s|/root|~|g" \
       -e "s|${HOST_SHORT}|<HOST>|g" \
@@ -73,7 +84,10 @@ redact() {
       -e 's|HF_TOKEN=[^ "]*|HF_TOKEN=<REDACTED>|g' \
       -e 's|HUGGING_FACE_HUB_TOKEN=[^ "]*|HUGGING_FACE_HUB_TOKEN=<REDACTED>|g' \
       -e 's|api_key=[^ "]*|api_key=<REDACTED>|gi' \
-      -e 's|hf_[A-Za-z0-9]\{30,\}|hf_<REDACTED>|g'
+      -e 's|hf_[A-Za-z0-9]\{30,\}|hf_<REDACTED>|g' \
+      -e 's|/opt/ai|<STACK_ROOT>|g' \
+      -e 's|/mnt/[a-z]/Users/[^ /]*|/mnt/<DRIVE>/Users/<REDACTED>|g' \
+      -e 's|/mnt/models|<MODELS>|g'
   else
     cat
   fi
@@ -264,7 +278,14 @@ else
   # actually decide whether GPU↔GPU P2P engages (see issues #137, #351).
   subsection "PCIe / P2P detail (lspci)"
   if ! have lspci; then
-    echo "_lspci not available (pciutils not installed) — skipping PCIe/P2P detail._"
+    # Fallback: nvidia-smi topo -p2p doesn't need pciutils and shows P2P capability
+    if have nvidia-smi && nvidia-smi topo -p2p rw >/dev/null 2>&1; then
+      echo "_lspci not available (pciutils not installed) — showing P2P capability matrix instead._"
+      echo
+      nvidia-smi topo -p2p rw | redact
+    else
+      echo "_lspci not available (pciutils not installed) — skipping PCIe/P2P detail._"
+    fi
   else
     # sudo lspci -vvv is needed for full capability blocks (ACS lives in the
     # extended config space, root-only). Degrade gracefully if sudo is
@@ -352,11 +373,21 @@ section "Display / desktop state"
   fi
 
   if have nvidia-smi; then
+    # Check if a club-3090 container is running (lightweight — full detection is later)
+    # NB: top-level (not in a function) — plain assignment, not `local`.
+    our_container=""
+    if have docker && docker info >/dev/null 2>&1; then
+      our_container=$(docker ps --format '{{.Names}}' --filter 'name=vllm-' --filter 'name=llama-cpp-' --filter 'name=club3090-' --filter 'name=ik-llama-' 2>/dev/null | head -1)
+    fi
     nvidia-smi --query-gpu=index,memory.used --format=csv,noheader,nounits 2>/dev/null \
       | while IFS=, read -r idx used; do
           idx="${idx# }"; used="${used# }"
           if [[ "$used" =~ ^[0-9]+$ ]] && [[ "$used" -gt 100 ]]; then
-            echo "- **GPU $idx idle VRAM:** ${used} MiB ⚠ something is using this GPU (display, browser, container)"
+            if [[ -n "$our_container" ]]; then
+              echo "- **GPU $idx idle VRAM:** ${used} MiB (held by running \`${our_container}\`)"
+            else
+              echo "- **GPU $idx idle VRAM:** ${used} MiB ⚠ something is using this GPU (display, browser, container)"
+            fi
           else
             echo "- **GPU $idx idle VRAM:** ${used} MiB ✓"
           fi
@@ -458,28 +489,49 @@ fi
 # verdict line + any FAIL rows here so a triage reply can immediately see
 # whether to trust kv-calc projections for this user's config.
 
+# Lightweight engine detection for kv-calc scoping (full detection is later in "Active container")
+CALIB_ENGINE_KIND="${ENGINE_KIND:-}"
+if [[ -z "$CALIB_ENGINE_KIND" ]]; then
+  if [[ -z "${CONTAINER:-}" ]] && have docker && docker info >/dev/null 2>&1; then
+    _calib_container=$(docker ps --format '{{.Names}}' --filter 'name=vllm-' --filter 'name=llama-cpp-' --filter 'name=club3090-' --filter 'name=ik-llama-' 2>/dev/null | head -1)
+    case "$_calib_container" in
+      vllm-*)      CALIB_ENGINE_KIND="vllm" ;;
+      llama-cpp-*) CALIB_ENGINE_KIND="llamacpp" ;;
+      *)           CALIB_ENGINE_KIND="unknown" ;;
+    esac
+  fi
+fi
+
 if have python3 && [[ -f tools/kv-calc.py ]]; then
   section "KV math calibration"
-  calib_output=$(python3 tools/kv-calc.py --calibration 2>&1 || true)
-  overall=$(echo "$calib_output" | grep -E '^Overall:' | head -1)
-  fail_rows=$(echo "$calib_output" | grep -E '\bFAIL\b' || true)
-  {
-    if [[ -n "$overall" ]]; then
-      echo "- ${overall}"
-    else
-      echo "- _kv-calc --calibration produced no Overall line; see output below._"
-    fi
-    if [[ -n "$fail_rows" ]]; then
-      echo "- ⚠ Failing rows:"
-      echo '```'
-      echo "$fail_rows"
-      echo '```'
-      echo "- Math model is mis-calibrated against measured reality for the rows above. Any kv-calc projection on this checkout should be treated as suspect until the calibration anchors / formulas are reconciled."
-    else
-      echo "- No FAIL rows. kv-calc projections should agree with measured VRAM within the ±1.5 GB error band."
-    fi
-  } | redact
-  echo "$calib_output" | redact | details "Full kv-calc --calibration output"
+  # Item 5: kv-calc calibration is vLLM-specific; skip on llama.cpp/ik_llama
+  if [[ "$CALIB_ENGINE_KIND" == "llamacpp" ]]; then
+    echo "- _kv-calc calibration is vLLM-specific — skipped on the llama.cpp engine._"
+  elif ! python3 -c 'import yaml' 2>/dev/null; then
+    # Item 1: graceful-degrade when PyYAML is missing
+    echo "- _kv-calc calibration skipped — PyYAML not installed (\`pip install pyyaml\`)._"
+  else
+    calib_output=$(python3 tools/kv-calc.py --calibration 2>&1 || true)
+    overall=$(echo "$calib_output" | grep -E '^Overall:' | head -1)
+    fail_rows=$(echo "$calib_output" | grep -E '\bFAIL\b' || true)
+    {
+      if [[ -n "$overall" ]]; then
+        echo "- ${overall}"
+      else
+        echo "- _kv-calc --calibration produced no Overall line; see output below._"
+      fi
+      if [[ -n "$fail_rows" ]]; then
+        echo "- ⚠ Failing rows:"
+        echo '```'
+        echo "$fail_rows"
+        echo '```'
+        echo "- Math model is mis-calibrated against measured reality for the rows above. Any kv-calc projection on this checkout should be treated as suspect until the calibration anchors / formulas are reconciled."
+      else
+        echo "- No FAIL rows. kv-calc projections should agree with measured VRAM within the ±1.5 GB error band."
+      fi
+    } | redact
+    echo "$calib_output" | redact | details "Full kv-calc --calibration output"
+  fi
 fi
 
 # ---------------------------------------------------------------------------
