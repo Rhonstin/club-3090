@@ -1,0 +1,99 @@
+# ===========================================================================
+# Profile (at-a-glance):
+#   Model:     Qwopus3.6-27B-v2-MTP (Jackrong) — Qwen3.6-27B fine-tune, distilled
+#              on Claude-Opus-4.6/4.7 reasoning traces ("TraceInversion"), with a
+#              custom-processed MTP head. Q4_K_M GGUF. Text-only (no mmproj).
+#   Engine:    llama.cpp (ghcr.io/ggml-org/llama.cpp:server-cuda, pinned b9246)
+#   Topology:  Single 3090 (TP=1)
+#   Drafter:   built-in MTP head, n=2 (--spec-type draft-mtp)
+#   KV:        q4_0 K + q4_0 V (densest mainline, Ampere-fast)
+#   Vision:    NO (repo ships no mmproj)
+#   Template:  native (GGUF-embedded) + thinking-off by default — see REASONING note
+#   Max ctx:   131072 default (@ -ub 1024); base Qwen3.6 reaches 262K @ -ub 512
+#   Status:    🧪 EVAL — unvalidated on this rig. Same DeltaNet arch + cliff
+#              behavior as base Qwen3.6-27B (cliff-immune ggml memory model).
+#
+#   ⚠ FIRST-BOOT CHECK (the whole point of this model is the MTP head):
+#     Jackrong used a CUSTOM Qwen-MTP split/merge methodology. Confirm our b9246
+#     build actually ENGAGES it — `docker logs <c> | grep -iE 'draft|mtp|spec'`
+#     should show the MTP/spec-decode path init + a non-zero accept rate under
+#     load. If MTP does NOT engage, this is just a slower Qwen3.6 fine-tune with
+#     none of the claimed ~1.66x speedup — fall back to plain decode + flag it.
+#
+#   Card claim (GB10, NOT Ampere — won't transfer in absolute terms): 10.46 vs
+#   6.29 t/s base (~1.66x via MTP), -27.7% completion tokens (more compact CoT),
+#   30/30 on their bench. Verify the *ratio* + token-compactness on our rig, not
+#   the absolute t/s.
+#
+# Quick start:
+#   1. Get the GGUF (SHA-verified):
+#        WEIGHTS=... (manual) hf download Jackrong/Qwopus3.6-27B-v2-MTP-GGUF \
+#          Qwopus3.6-27B-v2-MTP-Q4_K_M.gguf \
+#          --local-dir $MODEL_DIR/qwopus3.6-27b-v2-gguf/jackrong-mtp-q4km
+#   2. From this directory (single card → stop any other :8020 container first):
+#        MODEL_DIR=/your/models/dir docker compose -f mtp.yml up -d
+#   3. curl http://localhost:8020/v1/models  → should list the model.
+#
+# Override defaults via .env or shell:
+#   MODEL_DIR              host dir to mount as /models  (default: ../../../../../models-cache)
+#   GGUF_FILE             path under /models  (default: qwopus3.6-27b-v2-gguf/jackrong-mtp-q4km/Qwopus3.6-27B-v2-MTP-Q4_K_M.gguf)
+#   CTX_SIZE             KV pool size   (default: 131072 @ -ub 1024; for 262K set CTX_SIZE=262144 UBATCH_SIZE=512)
+#   BATCH_SIZE           llama.cpp -b   (default: 4096)
+#   UBATCH_SIZE          llama.cpp -ub  (default: 1024; lower to 512 to fund 262K)
+#   NP                   parallel slots (default: 1 — see ⚠ below)
+#   KV_TYPE              K and V quant  (default: q4_0)
+#   MTP_DRAFT_N_MAX      MTP draft tokens (default: 2 — base-Qwen sweet spot; A/B 3 here)
+#   REASONING            thinking gate  (default: off — but this is a REASONING model:
+#                        set REASONING=on to evaluate the Opus-trace CoT it was trained for)
+#   REASONING_FORMAT     reasoning routing (default: deepseek)
+#   TEMP / TEMPERATURE   sampling temp  (default: 0.8 — fine-tuner (Kyle Hessling) recommends
+#                        0.75-1: "higher temp lets the fine-tune shine + is more stable; SWE-bench
+#                        at temp 1, game at 0.8". TEMP wins over TEMPERATURE. Matches club-3090 #194.)
+#   TOP_P / TOP_K / MIN_P  sampling     (defaults: 0.95 / 20 / 0.0)
+#   REPEAT_PENALTY       repeat penalty (default: 1.0)
+#   PORT                 host port      (default: 8020)
+#   CUDA_VISIBLE_DEVICES which GPU      (default: 0)
+# ---------------------------------------------------------------------------
+
+services:
+  llama-cpp-qwopus36-v2-mtp:
+    image: ${LLAMACPP_IMAGE:-ghcr.io/ggml-org/llama.cpp:server-cuda-b9246}
+    container_name: "${ESTATE_CONTAINER:-llama-cpp-qwopus36-v2}"
+    restart: unless-stopped
+    ports:
+      - "${ESTATE_PORT:-${PORT:-8020}}:8080"
+    volumes:
+      - "${MODEL_DIR:-../../../../../models-cache}:/models:ro"
+    # ⚠ -np 1 is intentional on a single 24 GB card — do NOT raise it to
+    #   "parallelize." One GPU is compute-bound: extra slots divide its
+    #   throughput, they don't multiply it; -np>1 also auto-disables MTP. On a
+    #   higher-throughput card (5090) or multi-GPU the trade may flip.
+    command: >-
+      --host 0.0.0.0
+      --port 8080
+      -m /models/${GGUF_FILE:-qwopus3.6-27b-v2-gguf/jackrong-mtp-q4km/Qwopus3.6-27B-v2-MTP-Q4_K_M.gguf}
+      -c ${CTX_SIZE:-131072}
+      -b ${BATCH_SIZE:-4096}
+      -ub ${UBATCH_SIZE:-1024}
+      -ngl 99
+      -fa on
+      --cache-type-k ${KV_TYPE:-q4_0}
+      --cache-type-v ${KV_TYPE:-q4_0}
+      -np ${NP:-1}
+      --spec-type draft-mtp
+      --spec-draft-n-max ${MTP_DRAFT_N_MAX:-2}
+      --jinja
+      --reasoning ${REASONING:-off}
+      --reasoning-format ${REASONING_FORMAT:-deepseek}
+      --temp ${TEMP:-${TEMPERATURE:-0.8}}
+      --top-p ${TOP_P:-0.95}
+      --top-k ${TOP_K:-20}
+      --min-p ${MIN_P:-0.0}
+      --repeat-penalty ${REPEAT_PENALTY:-1.0}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${ESTATE_GPUS:-${CUDA_VISIBLE_DEVICES:-0}}"]
+              capabilities: [compute, utility]
