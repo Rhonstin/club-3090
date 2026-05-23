@@ -1039,15 +1039,72 @@ except Exception:
   echo "${n_ctx:-0}"
 }
 
-# Capture free VRAM across all visible GPUs (sum, in MB).
+# Capture free VRAM for the model's GPU(s) only (sum, in MB).
+# On a multi-GPU host running a single-card compose (CUDA_VISIBLE_DEVICES=0),
+# summing ALL GPUs inflates the margin with idle card memory — defeating the
+# gate. We read the container's DeviceRequests (Docker) or CUDA_VISIBLE_DEVICES
+# env to identify which GPU(s) the model actually uses.
+#
+# Priority:
+#   1. Docker HostConfig.DeviceRequests[0].DeviceIDs (compose device_ids)
+#   2. Container env CUDA_VISIBLE_DEVICES
+#   3. Container env NVIDIA_VISIBLE_DEVICES (if numeric, e.g. "0")
+#   4. Fallback: sum all GPUs with a warning (multi-GPU host, can't determine subset)
 # Returns 0 when nvidia-smi is unavailable.
 get_vram_free_mb() {
   if ! command -v nvidia-smi >/dev/null 2>&1; then
     echo 0
     return
   fi
-  nvidia-smi --query-gpu=memory.free --format=csv,noheader,nounits 2>/dev/null \
-    | awk '{s+=$1} END {printf "%.0f\n", s}' 2>/dev/null || echo 0
+
+  local gpu_ids=""
+
+  # Try Docker DeviceRequests (compose device_ids: ["0"])
+  if [[ "${CONTAINER:-}" != "none" ]] \
+     && command -v docker >/dev/null 2>&1 \
+     && docker inspect "$CONTAINER" >/dev/null 2>&1; then
+    gpu_ids="$(docker inspect "$CONTAINER" 2>/dev/null \
+      | python3 -c "
+import json, sys
+try:
+    cfg = json.load(sys.stdin)[0]
+    drs = cfg.get('HostConfig', {}).get('DeviceRequests', []) or []
+    for dr in drs:
+        ids = dr.get('DeviceIDs', [])
+        if ids:
+            print(','.join(ids))
+            sys.exit(0)
+    # Fallback: check env vars
+    for e in cfg.get('Config', {}).get('Env', []) or []:
+        if e.startswith('CUDA_VISIBLE_DEVICES='):
+            val = e.split('=', 1)[1]
+            if val and val != 'all':
+                print(val)
+                sys.exit(0)
+        if e.startswith('NVIDIA_VISIBLE_DEVICES='):
+            val = e.split('=', 1)[1]
+            if val and val != 'all' and val.replace(',', '').isdigit():
+                print(val)
+                sys.exit(0)
+    print('')
+except Exception:
+    print('')
+" 2>/dev/null)"
+  fi
+
+  if [[ -n "$gpu_ids" ]]; then
+    nvidia-smi -i "$gpu_ids" --query-gpu=memory.free --format=csv,noheader,nounits 2>/dev/null \
+      | awk '{s+=$1} END {printf "%.0f\n", s}' 2>/dev/null || echo 0
+  else
+    # Can't determine which GPUs — sum all, but flag it
+    local total_gpus
+    total_gpus="$(nvidia-smi --query-gpu=index --format=csv,noheader 2>/dev/null | wc -l)"
+    if [[ "$total_gpus" -gt 1 ]]; then
+      echo "    [vram] WARN: could not determine model GPU(s) on ${total_gpus}-GPU host — summing all (margin may be inflated)" >&2
+    fi
+    nvidia-smi --query-gpu=memory.free --format=csv,noheader,nounits 2>/dev/null \
+      | awk '{s+=$1} END {printf "%.0f\n", s}' 2>/dev/null || echo 0
+  fi
 }
 
 echo "[8/8] Context ceiling ladder (staggered NIAH from ~${CEILING_START_TOKENS:-95000} → ~${CEILING_FRACTION:-0.92} × n_ctx) ..."
@@ -1103,8 +1160,48 @@ print(' '.join(str(r) for r in rungs))
     rung_timeout="${STRESS_CEILING_TIMEOUT_S:-900}"
   fi
 
+  # Step 2b: calibrate filler→token ratio with a small probe.
+  # The old heuristic (target_tokens / 3.5) was ~18x off for this tokenizer
+  # (block is 290 chars × scale repetitions; the "3.5" treated scale as chars
+  # not block-reps, producing prompts far exceeding n_ctx → HTTP 400).
+  # Send a scale=100 probe, read back prompt_tokens, compute the real ratio.
+  local tok_per_scale_unit=0
+  local cal_req cal_result
+  cal_req="$(mktemp --suffix=.json)"
+  cal_result="$(mktemp --suffix=.json)"
+  python3 -c "
+import json
+block = (
+    'This section describes the history of computing in detail. '
+    'Transistors were invented in 1947 at Bell Labs. The integrated circuit came a decade later. '
+    'Microprocessors emerged in the 1970s and changed the world. '
+    'Personal computing followed, then networking, then the web, then cloud and AI. '
+) * 100
+req = {
+    'model': '${MODEL}',
+    'messages': [{'role': 'user', 'content': block + '\n\nHi.'}],
+    'max_tokens': 5, 'temperature': 0.0,
+    'chat_template_kwargs': {'enable_thinking': False},
+}
+with open('${cal_req}', 'w') as f:
+    json.dump(req, f)
+" 2>/dev/null
+  send_streaming_niah "$cal_req" "$cal_result" "$URL" 60 2>/dev/null
+  local cal_tokens
+  cal_tokens="$(python3 -c "import json; print(json.load(open('$cal_result')).get('prompt_tokens', 0))" 2>/dev/null || echo 0)"
+  rm -f "$cal_req" "$cal_result"
+  if [[ "$cal_tokens" -gt 0 ]]; then
+    # tokens_per_scale_unit = cal_tokens / 100 (we sent scale=100 worth of blocks)
+    tok_per_scale_unit="$(python3 -c "print(round(${cal_tokens} / 100, 2))" 2>/dev/null || echo 0)"
+    echo "    calibrated: scale=100 → ${cal_tokens} tokens (tok/scale_unit=${tok_per_scale_unit})"
+  else
+    # Fallback: use a conservative estimate (65 tok/scale_unit for Qwen tokenizers)
+    tok_per_scale_unit=65
+    echo "    calibration probe failed — using fallback tok/scale_unit=${tok_per_scale_unit}"
+  fi
+
   # Step 3: run each rung
-  local any_pass=0 any_fail=0 any_skipped=0 any_recall_miss=0
+  local any_pass=0 any_fail=0 any_skipped=0 any_recall_miss=0 any_sizing_error=0
   local last_pass_tokens=0 last_pass_pct=0
   local first_fail_tokens=0 first_recall_miss_tokens=0 first_recall_miss_pct=0
   local vram_before_all vram_after_all
@@ -1117,8 +1214,8 @@ print(' '.join(str(r) for r in rungs))
   for target_tokens in $rungs; do
     rung_idx=$((rung_idx + 1))
     local filler_scale
-    # scale ≈ target_tokens / 3.5 (empirical: filler block ~3.5 tok/char)
-    filler_scale="$(python3 -c "print(max(100, int(${target_tokens} / 3.5)))")"
+    # scale = target_tokens / tok_per_scale_unit (calibrated, not hardcoded)
+    filler_scale="$(python3 -c "print(max(100, int(${target_tokens} / ${tok_per_scale_unit})))")" 
 
     # Build + send the NIAH request
     local secret_file req_file http_code
@@ -1236,11 +1333,26 @@ EOF
         fi
         ;;
       400)
-        printf "    \033[33m⊘\033[0m rung %d/%d: target=%dK  HTTP 400 (exceeds engine limit — clean rejection)%s\n" \
-          "$rung_idx" "$rung_count" "$((target_tokens / 1000))" "$vram_str"
-        rm -f "$result_file"
-        any_skipped=1
-        # Engine's hard limit — no point trying deeper rungs
+        # HTTP 400 can mean two things:
+        #   (a) target > n_ctx → engine correctly rejected (legitimate skip)
+        #   (b) target < n_ctx → our filler→token sizing overshot (BUG, not a skip)
+        # Distinguish by comparing the rung target against n_ctx.
+        if [[ "$target_tokens" -lt "$n_ctx" ]]; then
+          printf "    \033[31m✗\033[0m rung %d/%d: target=%dK < n_ctx=%d but HTTP 400 — filler sizing overshot%s\n" \
+            "$rung_idx" "$rung_count" "$((target_tokens / 1000))" "$n_ctx" "$vram_str"
+          rm -f "$result_file"
+          any_sizing_error=1
+          any_fail=1
+          if [[ "$first_fail_tokens" -eq 0 ]]; then
+            first_fail_tokens="$target_tokens"
+          fi
+        else
+          printf "    \033[33m⊘\033[0m rung %d/%d: target=%dK  HTTP 400 (exceeds engine limit — clean rejection)%s\n" \
+            "$rung_idx" "$rung_count" "$((target_tokens / 1000))" "$vram_str"
+          rm -f "$result_file"
+          any_skipped=1
+        fi
+        # Either way — stop the ladder (deeper rungs will also 400)
         break
         ;;
       500)
@@ -1311,11 +1423,18 @@ EOF
   elif [[ "$any_recall_miss" == "1" && "$any_fail" == "1" ]]; then
     fail "ceiling ladder: wall at ~${first_fail_tokens} tok — recall miss at ${first_recall_miss_tokens} tok, then OOMed" \
          "Attention quality dropped at ${first_recall_miss_tokens} tok, system filled to ~${first_fail_tokens} tok. Real usable ceiling is lower. Check: ${LOG_CMD}"
+  elif [[ "$any_sizing_error" == "1" ]]; then
+    fail "ceiling ladder: filler→token sizing error — rung target < n_ctx but got HTTP 400" \
+         "Calibration probe measured tok/scale_unit=${tok_per_scale_unit} but rungs still overshot. " \
+         "Check the calibration output above. This is a verify-stress.sh bug, not an engine issue."
   elif [[ "$any_fail" == "1" ]]; then
     fail "ceiling ladder: first rung at ${ceiling_start} tok already failed — ceiling may be below probe 7 range" \
          "Check whether the engine survived probe 7's 90K rung. If not, the ceiling is <90K. Check: ${LOG_CMD}"
   elif [[ "$any_pass" == "0" && "$any_skipped" == "1" ]]; then
-    skip "all ceiling rungs above engine limit"
+    # All rungs got legitimate HTTP 400 (target > n_ctx) — ladder measured nothing.
+    # This is NOT a pass. A ladder that tested nothing must warn.
+    fail "ceiling ladder: no rungs tested — all targets exceeded engine limit" \
+         "CEILING_START_TOKENS=${ceiling_start} is above the engine's max. Lower it or check n_ctx detection (detected n_ctx=${n_ctx})."
   else
     fail "ceiling ladder: no rung succeeded and none were skipped" \
          "Engine may have crashed early. Check: ${LOG_CMD}"

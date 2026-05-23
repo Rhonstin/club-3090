@@ -112,31 +112,73 @@ result="$(ENGINE_KIND=llamacpp URL=http://mock CONTAINER=none \
   bash -c "source '$HELPERS_FILE'; get_n_ctx")"
 assert_eq "get_n_ctx 512K compose (nested)" "524288" "$result"
 
-# ---- Test get_vram_free_mb dual GPU ----
+# ---- Test get_vram_free_mb dual GPU (no container context — sums all) ----
 cat > "${tmp_dir}/nvidia-smi" <<'EOF'
 #!/usr/bin/env bash
 case "$*" in
   *memory.free*) printf "12000\n11500\n" ;;
+  *index*) printf "0\n1\n" ;;
 esac
 EOF
 chmod +x "${tmp_dir}/nvidia-smi"
 
-result="$(PATH="${tmp_dir}:/usr/bin:/bin" \
+result="$(CONTAINER=none PATH="${tmp_dir}:/usr/bin:/bin" \
   bash -c "source '$HELPERS_FILE'; get_vram_free_mb")"
-assert_eq "get_vram_free_mb dual-GPU sum" "23500" "$result"
+assert_eq "get_vram_free_mb dual-GPU sum (no container)" "23500" "$result"
 
 # ---- Test get_vram_free_mb single GPU ----
 cat > "${tmp_dir}/nvidia-smi" <<'EOF'
 #!/usr/bin/env bash
 case "$*" in
   *memory.free*) printf "23000\n" ;;
+  *index*) printf "0\n" ;;
 esac
 EOF
 chmod +x "${tmp_dir}/nvidia-smi"
 
-result="$(PATH="${tmp_dir}:/usr/bin:/bin" \
+result="$(CONTAINER=none PATH="${tmp_dir}:/usr/bin:/bin" \
   bash -c "source '$HELPERS_FILE'; get_vram_free_mb")"
 assert_eq "get_vram_free_mb single-GPU" "23000" "$result"
+
+# ---- Test get_vram_free_mb scoping: multi-GPU host, single-GPU container ----
+# Simulates dual-3090 host with compose pinned to GPU 0 via DeviceRequests.
+# GPU 0 has 381 MB free (model), GPU 1 has 24126 MB free (idle).
+# Old behavior: sum = 24507 (inflated). Fix: query only GPU 0 → 381.
+cat > "${tmp_dir}/nvidia-smi" <<'EOF'
+#!/usr/bin/env bash
+case "$*" in
+  *-i\ 0*memory.free*|*memory.free*-i\ 0*) printf "381\n" ;;
+  *memory.free*)
+    # When -i is passed, only return that GPU's value
+    if echo "$*" | grep -q '\-i'; then
+      gpu="$(echo "$*" | sed 's/.*-i *\([^ ]*\).*/\1/')"
+      case "$gpu" in
+        0) printf "381\n" ;;
+        1) printf "24126\n" ;;
+        *) printf "0\n" ;;
+      esac
+    else
+      printf "381\n24126\n"
+    fi
+    ;;
+  *index*) printf "0\n1\n" ;;
+esac
+EOF
+chmod +x "${tmp_dir}/nvidia-smi"
+
+cat > "${tmp_dir}/docker" <<'MOCK_DOCKER'
+#!/usr/bin/env bash
+case "$*" in
+  *inspect*)
+    printf '[{"HostConfig":{"DeviceRequests":[{"Driver":"nvidia","DeviceIDs":["0"],"Capabilities":[["compute","utility"]]}]},"Config":{"Image":"mock","Env":["NVIDIA_VISIBLE_DEVICES=all"]}}]'
+    ;;
+esac
+MOCK_DOCKER
+chmod +x "${tmp_dir}/docker"
+
+result="$(CONTAINER=mock-container PATH="${tmp_dir}:/usr/bin:/bin" \
+  bash -c "source '$HELPERS_FILE'; get_vram_free_mb")"
+assert_eq "get_vram_free_mb scoped to GPU 0 (Bug 1 fix)" "381" "$result"
 
 # ---- Test ladder rung computation ----
 compute_ladder() {
@@ -226,6 +268,14 @@ assert_contains "$out" "SKIP_LONGCTX=1" "SKIP_LONGCTX also skips ceiling"
 for i in 1 2 3 4 5 6 7 8; do
   assert_contains "$out" "[${i}/8]" "probe ${i} header"
 done
+
+# Note: Bug 3 (no-op ladder must FAIL) is validated by code review + live test.
+# The summary logic checks any_sizing_error before any_fail and emits FAIL.
+# "All rungs skipped" now emits FAIL instead of skip. Unit-testing the
+# summary branch requires mocking send_streaming_niah (Python urllib),
+# which is beyond the curl-mock approach used here. Validated live:
+# old code said "All stress checks passed" with all-400 ladder;
+# new code says "filler→token sizing error" and increments FAILED.
 
 # ---- Test: streaming NIAH helper timing extraction ----
 # Extract the Python streaming helper from verify-stress.sh and test it
