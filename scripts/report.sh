@@ -15,6 +15,7 @@
 #   bash scripts/report.sh --full            # ALL four: verify + stress + soak + bench (~35 min, the canonical "everything" pass for cross-rig contributions)
 #   bash scripts/report.sh --no-redact       # disable path/host/user redaction
 #   bash scripts/report.sh --container NAME  # override container auto-detection
+#   bash scripts/report.sh --full-calibration  # kv-calc matrix for ALL models (default: only the running model; skipped on llama.cpp/ik_llama)
 #   bash scripts/report.sh > my-rig.md       # capture for paste
 #
 # Why --soak is its own flag:
@@ -34,6 +35,9 @@ DO_SOAK=0
 DO_BENCH=0
 REDACT=1
 CONTAINER=""
+# KV-calc calibration is scoped to the running model by default (#168). Set to 1
+# (flag or REPORT_FULL_CALIBRATION=1) to emit the full catalog-wide matrix.
+FULL_CALIBRATION="${REPORT_FULL_CALIBRATION:-0}"
 
 print_help() {
   sed -n '2,/^set/p' "$0" | sed 's/^# \?//' | head -n -1
@@ -48,6 +52,7 @@ while [[ $# -gt 0 ]]; do
     --full) DO_VERIFY=1; DO_STRESS=1; DO_SOAK=1; DO_BENCH=1; shift ;;
     --no-redact) REDACT=0; shift ;;
     --container) CONTAINER="${2:-}"; shift 2 ;;
+    --full-calibration) FULL_CALIBRATION=1; shift ;;
     -h|--help) print_help; exit 0 ;;
     *) echo "Unknown arg: $1" >&2; echo "Try: bash scripts/report.sh --help" >&2; exit 1 ;;
   esac
@@ -59,6 +64,9 @@ done
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
+
+# KV-calc calibration helpers (engine/model detection + per-model filter, #168).
+source "$REPO_ROOT/scripts/lib/report_calib.sh"
 
 # Pick up a saved MODEL_DIR (and other config) from the repo .env — same as
 # launch.sh / switch.sh, and what setup.sh writes there. An explicit exported
@@ -489,29 +497,34 @@ fi
 # verdict line + any FAIL rows here so a triage reply can immediately see
 # whether to trust kv-calc projections for this user's config.
 
-# Lightweight engine detection for kv-calc scoping (full detection is later in "Active container")
-CALIB_ENGINE_KIND="${ENGINE_KIND:-}"
-if [[ -z "$CALIB_ENGINE_KIND" ]]; then
-  if [[ -z "${CONTAINER:-}" ]] && have docker && docker info >/dev/null 2>&1; then
-    _calib_container=$(docker ps --format '{{.Names}}' --filter 'name=vllm-' --filter 'name=llama-cpp-' --filter 'name=club3090-' --filter 'name=ik-llama-' 2>/dev/null | head -1)
-    case "$_calib_container" in
-      vllm-*)      CALIB_ENGINE_KIND="vllm" ;;
-      llama-cpp-*) CALIB_ENGINE_KIND="llamacpp" ;;
-      *)           CALIB_ENGINE_KIND="unknown" ;;
-    esac
-  fi
+# Engine + model detection for kv-calc scoping (#168). Resolve the active
+# container (explicit --container wins; else first running club-3090 container),
+# then map it to a kv-calc engine family + model id via scripts/lib/report_calib.sh.
+_calib_container="${CONTAINER:-}"
+if [[ -z "$_calib_container" ]] && have docker && docker info >/dev/null 2>&1; then
+  _calib_container=$(docker ps --format '{{.Names}}' --filter 'name=vllm-' --filter 'name=llama-cpp-' --filter 'name=club3090-' --filter 'name=ik-llama-' 2>/dev/null | head -1)
 fi
+CALIB_ENGINE_KIND="${ENGINE_KIND:-$(calib_engine_for_container "$_calib_container")}"
+CALIB_MODEL_ID="$(calib_model_for_container "$_calib_container")"
 
 if have python3 && [[ -f tools/kv-calc.py ]]; then
   section "KV math calibration"
-  # Item 5: kv-calc calibration is vLLM-specific; skip on llama.cpp/ik_llama
+  # kv-calc is vLLM-memory-model-coupled; skip on the ggml engines (llama.cpp + ik_llama).
   if [[ "$CALIB_ENGINE_KIND" == "llamacpp" ]]; then
-    echo "- _kv-calc calibration is vLLM-specific — skipped on the llama.cpp engine._"
+    echo "- _kv-calc calibration is vLLM-specific — skipped on the llama.cpp / ik_llama engine (ggml uses a different allocator)._"
   elif ! python3 -c 'import yaml' 2>/dev/null; then
     # Item 1: graceful-degrade when PyYAML is missing
     echo "- _kv-calc calibration skipped — PyYAML not installed (\`pip install pyyaml\`)._"
   else
-    calib_output=$(python3 tools/kv-calc.py --calibration 2>&1 || true)
+    # #168: scope to the running model by default; --full-calibration (or
+    # REPORT_FULL_CALIBRATION=1) restores the catalog-wide matrix. Falls back to
+    # the full matrix when the model can't be resolved.
+    calib_scope=""
+    if [[ "$FULL_CALIBRATION" != "1" && -n "$CALIB_MODEL_ID" ]]; then
+      calib_scope="$CALIB_MODEL_ID"
+      echo "- _Scoped to the running model \`${CALIB_MODEL_ID}\` — pass \`--full-calibration\` for all calibrated models._"
+    fi
+    calib_output=$(python3 tools/kv-calc.py --calibration 2>&1 | calib_filter_model_section "$calib_scope" || true)
     overall=$(echo "$calib_output" | grep -E '^Overall:' | head -1)
     fail_rows=$(echo "$calib_output" | grep -E '\bFAIL\b' || true)
     {
