@@ -62,8 +62,8 @@ On a single RTX 3090 running Qwen3.6-27B AutoRound INT4 dense via vLLM long-text
 
 ```bash
 # 1. Boot long-text 218K with enable_in_reasoning=true (currently in long-text.yml)
-cd /opt/ai/github/club-3090/models/qwen3.6-27b/vllm/compose
-MODEL_DIR=/opt/ai/github/qwen36-dual-3090/models docker compose -f single/long-text.yml up -d
+cd models/qwen3.6-27b/vllm/compose
+MODEL_DIR=/your/models/dir docker compose -f single/long-text.yml up -d
 
 # 2. Set up the harness
 git clone https://github.com/andthattoo/structured-cot.git ~/structured-cot
@@ -79,7 +79,7 @@ git clone https://github.com/andthattoo/structured-cot.git ~/structured-cot
 /tmp/structured-cot-venv/bin/python fsm_vs_free_eval.py \
   --base-url http://localhost:8020/v1 \
   --model qwen3.6-27b-autoround \
-  --tokenizer /opt/ai/github/qwen36-dual-3090/models/qwen3.6-27b-autoround-int4 \
+  --tokenizer $MODEL_DIR/qwen3.6-27b-autoround-int4 \
   --dataset humaneval --n-problems 164 --only all \
   --grammar-file grammars/fsm_grammar_no_open.gbnf \
   --max-tokens 4096 --request-timeout 600 \
@@ -89,7 +89,7 @@ git clone https://github.com/andthattoo/structured-cot.git ~/structured-cot
 /tmp/structured-cot-venv/bin/python fsm_vs_free_eval.py \
   --base-url http://localhost:8020/v1 \
   --model qwen3.6-27b-autoround \
-  --tokenizer /opt/ai/github/qwen36-dual-3090/models/qwen3.6-27b-autoround-int4 \
+  --tokenizer $MODEL_DIR/qwen3.6-27b-autoround-int4 \
   --dataset livecodebench --lcb-version release_v6 \
   --date-cutoff 2025-01-01 --platform leetcode \
   --n-problems 50 --only all \
@@ -212,7 +212,7 @@ The eval script's `message_text()` checks `reasoning_content` first; vLLM expose
 ## What's saved on disk
 
 ```
-/home/wasif/structured-cot/runs/
+structured-cot/runs/ (host-local)
 ├── smoke-2026-04-30/                  # 10-problem HE+ smoke (33.7×, +0pp)
 ├── full-humaneval-2026-04-30/         # full HE+ 164
 │   ├── results.jsonl                  # per-problem JSON (raw_response, think, code, extraction)
