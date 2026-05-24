@@ -116,6 +116,68 @@ Bench protocol: 3 warm + 5 measured runs. See [`scripts/bench.sh`](scripts/bench
 
 ---
 
+## Benchmarks
+
+Reproduce the numbers above on your own rig. All benchmarks run against the **currently-running** compose (boot one first via `launch.sh`).
+
+**Throughput (TPS)** — the canonical narrative + code bench (3 warmup + 5 measured per prompt):
+
+```bash
+bash scripts/bench.sh
+```
+
+**Behavioral quality** — tool-call correctness, instruction-following, structured output, etc. via `benchlocal-cli`:
+
+```bash
+bash scripts/quality-test.sh                          # --medium: 5 packs (default, ~15-25 min, no Docker)
+bash scripts/quality-test.sh --quick                  # 2 packs (~5-10 min, no Docker)
+bash scripts/quality-test.sh --full                   # 8 packs / 150 scenarios (~25-40 min, needs Docker)
+bash scripts/quality-test.sh --pack aider-polyglot-30 # a single named pack
+```
+
+**Full rebench (one model, everything)** — the canonical 5-step pipeline (`bench` → `verify-stress` → `quality-test --full` → `soak` → `aider-polyglot-30`), ~1.75-2 hr per leg. All artifacts land under `results/rebench/<tag>/`:
+
+```bash
+bash scripts/rebench-full.sh                      # auto-tag from MODEL
+bash scripts/rebench-full.sh --tag qwen-int8      # explicit tag
+bash scripts/rebench-full.sh --skip soak,aider    # skip phases (CSV)
+bash scripts/rebench-full.sh --resume             # resume an interrupted run (skip completed steps)
+
+# Endpoint-first mode (non-Docker engines: llama-swap, ramalama, raw llama-server, …):
+bash scripts/rebench-full.sh \
+  --url http://HOST:PORT --model 'MODEL-NAME' --engine llama-cpp   # vllm|llama-cpp|sglang|other
+```
+
+Run `rebench-full.sh` twice on different models to assemble a matched-config head-to-head. Full test-pipeline reference: [`docs/QUALITY_TEST.md`](docs/QUALITY_TEST.md).
+
+---
+
+## Diagnostics
+
+When filing a bug, sharing cross-rig data, or replying to a triage thread, generate a paste-ready triage report — it captures hardware, OS, GPU, container runtime, stack version, and active container state as markdown. **Home paths, hostnames, usernames, and HF tokens are redacted by default**, so it's safe to paste into a public issue or discussion.
+
+```bash
+# Quick report (~2 sec) — hardware + stack + boot-log highlights
+bash scripts/report.sh
+
+# Capture to a file ready to paste into a GitHub issue/discussion
+bash scripts/report.sh > my-rig.md
+
+# Add live test output (pick what the thread needs):
+bash scripts/report.sh --verify    # + verify-full.sh         (~1-2 min)
+bash scripts/report.sh --stress    # + verify-stress.sh 7/7   (~5-10 min)
+bash scripts/report.sh --soak      # + continuous soak        (~25 min) — catches Cliff 2b
+bash scripts/report.sh --bench     # + bench.sh TPS           (~3 min)
+bash scripts/report.sh --full      # ALL four — the canonical "everything" cross-rig pass (~35 min)
+
+# Internal sharing only (disable redaction):
+bash scripts/report.sh --no-redact
+```
+
+`--soak` is its own flag because a config can pass verify + stress + bench and still fail the multi-turn continuous soak (Cliff 2b at ~25K accumulated tokens) — soak is currently the only test that catches that agentic-workload failure mode. See [`docs/CLIFFS.md`](docs/CLIFFS.md).
+
+---
+
 ## Repo layout
 
 ```
