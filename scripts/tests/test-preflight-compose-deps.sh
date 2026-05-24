@@ -37,6 +37,16 @@ run_deps() {
   ) 2>&1
 }
 
+run_deps_unset_model_dir() {
+  local compose="$1"
+  (
+    unset MODEL_DIR
+    export ROOT_DIR
+    source "${ROOT_DIR}/scripts/preflight.sh"
+    preflight_compose_deps "$compose"
+  ) 2>&1
+}
+
 expect_missing() {
   local compose="$1"
   local model_dir="$2"
@@ -62,6 +72,8 @@ YAML
 
 out="$(expect_missing "$ik_compose" "${TMP_DIR}/empty-models")"
 assert_contains "$out" "qwen3.6-27b-gguf/ubergarm-mtp-iq4ks/Qwen3.6-27B-MTP-IQ4_KS.gguf"
+assert_contains "$out" "hf download ubergarm/Qwen3.6-27B-GGUF Qwen3.6-27B-MTP-IQ4_KS.gguf"
+assert_contains "$out" "WEIGHTS=iq4ks bash scripts/setup.sh qwen3.6-27b"
 assert_not_contains "$out" "qwen3.6-27b-autoround-int4"
 
 llama_compose="${TMP_DIR}/llama.yml"
@@ -91,6 +103,9 @@ YAML
 out="$(expect_missing "$vllm_compose" "${TMP_DIR}/empty-models")"
 assert_contains "$out" "gemma-4-31b-autoround-int4/config.json"
 assert_contains "$out" "gemma-4-31b-it-assistant/config.json"
+assert_contains "$out" "hf download Intel/gemma-4-31B-it-int4-AutoRound"
+assert_contains "$out" "hf download google/gemma-4-31B-it-assistant"
+assert_contains "$out" "bash scripts/setup.sh gemma-4-31b"
 assert_not_contains "$out" "qwen3.6-27b-autoround-int4"
 mkdir -p "${TMP_DIR}/models/gemma-4-31b-autoround-int4" "${TMP_DIR}/models/gemma-4-31b-it-assistant"
 touch "${TMP_DIR}/models/gemma-4-31b-autoround-int4/config.json" "${TMP_DIR}/models/gemma-4-31b-it-assistant/config.json"
@@ -118,6 +133,20 @@ YAML
 out="$(expect_missing "$extends_stub" "${TMP_DIR}/empty-models")"
 assert_contains "$out" "qwen3.6-27b-autoround-int4/config.json"
 
+if out="$(run_deps_unset_model_dir "$extends_stub")"; then
+  echo "ASSERTION FAILED: expected missing-model failure with unset MODEL_DIR" >&2
+  echo "--- output ---" >&2
+  echo "$out" >&2
+  exit 1
+fi
+assert_contains "$out" "MODEL_DIR not set"
+assert_contains "$out" "defaulting to ${ROOT_DIR}/models-cache"
+
+out="$(CLUB3090_WEIGHTS_READER_DISABLE=1 expect_missing "$extends_stub" "${TMP_DIR}/empty-models")"
+assert_contains "$out" "qwen3.6-27b-autoround-int4/config.json"
+assert_contains "$out" "Check the compose header for its model-specific hf download command."
+assert_not_contains "$out" "hf download Lorbus/Qwen3.6-27B-int4-AutoRound"
+
 sglang_compose="${TMP_DIR}/sglang.yml"
 cat > "$sglang_compose" <<'YAML'
 services:
@@ -130,6 +159,8 @@ YAML
 out="$(expect_missing "$sglang_compose" "${TMP_DIR}/empty-models")"
 assert_contains "$out" "qwen3.6-27b-autoround-int4"
 assert_contains "$out" "qwen3.6-27b-prism-eagle3/compressed"
+assert_contains "$out" "hf download Ex0bit/Qwen3.6-27B-PRISM-EAGLE3"
+assert_contains "$out" "WITH_PRISM_EAGLE3=1 bash scripts/setup.sh qwen3.6-27b"
 mkdir -p "${TMP_DIR}/models/qwen3.6-27b-autoround-int4" "${TMP_DIR}/models/qwen3.6-27b-prism-eagle3/compressed"
 out="$(run_deps "$sglang_compose" "${TMP_DIR}/models")"
 [[ -z "$out" ]]

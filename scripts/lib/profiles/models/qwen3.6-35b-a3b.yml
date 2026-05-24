@@ -31,33 +31,52 @@ vision_capable: true
 weights:
   autoround_int4:
     path: qwen3.6-35b-a3b-autoround-int4
+    local_subdir: qwen3.6-35b-a3b-autoround-int4
     size_gb: 20.0
     format: autoround
     status: production
-    # v0.8.0 Pull-Gate Tier-1 lookup slug (verified in
-    # vllm/compose/dual/preview.yml `target:` line).
+    hf_repo: Qwen/Qwen3-MoE-A3B-Instruct-AutoRound-Int4-mixed
     hf_repos:
       - Qwen/Qwen3-MoE-A3B-Instruct-AutoRound-Int4-mixed
+    engine: vllm
+    kind: main
+    verify_glob: "*.safetensors"
   gptq_int4:
     path: qwen3.6-35b-a3b-gptq-int4
+    local_subdir: qwen3.6-35b-a3b-gptq-int4
     size_gb: 22.0
     format: gptq
     status: experimental
+    engine: vllm
+    kind: main
+    verify_glob: "*.safetensors"
   gguf:
     path: qwen3.6-35b-a3b-gguf
+    local_subdir: qwen3.6-35b-a3b-gguf
     size_gb: 90.0
     format: gguf
     status: production
+    engine: llama-cpp
+    kind: gguf
+    verify_glob: "*.gguf"
   dflash:
     path: qwen3.6-35b-a3b-dflash
+    local_subdir: qwen3.6-35b-a3b-dflash
     size_gb: variable
     format: autoround
     status: experimental
+    engine: vllm
+    kind: draft
+    verify_glob: "*.safetensors"
   dflash_gguf:
     path: qwen3.6-35b-a3b-dflash-gguf
+    local_subdir: qwen3.6-35b-a3b-dflash-gguf
     size_gb: variable
     format: gguf
     status: experimental
+    engine: llama-cpp
+    kind: gguf
+    verify_glob: "*.gguf"
 default_weight_variant: autoround_int4
 compatible_drafters:
   - qwen-mtp-builtin

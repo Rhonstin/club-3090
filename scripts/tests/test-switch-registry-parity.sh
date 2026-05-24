@@ -140,6 +140,36 @@ for k in "${!SW_MAP[@]}"; do
   fi
 done
 
+# 3e. User-facing single-card compose coverage guard. A compose shipped under
+# models/*/{vllm,llama-cpp,ik-llama}/compose/single must not silently drift out
+# of COMPOSE_REGISTRY (discussions/184 / #379-class failure).
+while IFS=$'\t' read -r relpath registered; do
+  [[ -n "$relpath" ]] || continue
+  if [[ "$registered" != "1" ]]; then
+    note "single-card compose exists on disk but has no compose_registry.py entry: $relpath"
+  fi
+done < <(
+  python3 - "$ROOT_DIR" <<'PY'
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+sys.path.insert(0, str(root))
+from scripts.lib.profiles.compose_registry import COMPOSE_REGISTRY
+
+registered_paths = {entry["compose_path"] for entry in COMPOSE_REGISTRY.values()}
+opt_out = {
+    # Add intentionally-internal single-card compose paths here with a comment.
+}
+for engine in ("vllm", "llama-cpp", "ik-llama"):
+    for path in sorted(root.glob(f"models/*/{engine}/compose/single/*.yml")):
+        rel = path.relative_to(root).as_posix()
+        if rel in opt_out:
+            continue
+        print(f"{rel}\t{1 if rel in registered_paths else 0}")
+PY
+)
+
 if [[ "$fail" -ne 0 ]]; then
   echo "[switch-registry-parity] FAIL" >&2
   exit 1

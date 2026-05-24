@@ -584,7 +584,18 @@ preflight_hf_token() {
 # Skip via: PREFLIGHT_NO_COMPOSE_DEPS=1
 _preflight_compose_model_dir() {
   local compose_file="$1"
-  local model_dir="${MODEL_DIR:-../../../../models-cache}"
+  local model_dir
+
+  if [[ -n "${MODEL_DIR:-}" ]]; then
+    model_dir="${MODEL_DIR}"
+  else
+    local root_dir="${ROOT_DIR:-}"
+    if [[ -z "$root_dir" ]]; then
+      root_dir="$(cd -- "${_PREFLIGHT_DIR}/.." && pwd)"
+    fi
+    model_dir="${root_dir}/models-cache"
+    echo "[preflight] MODEL_DIR not set — defaulting to ${model_dir}" >&2
+  fi
 
   # Resolve relative paths against the compose location. Do not require the
   # directory to already exist; this function is often called before download.
@@ -620,6 +631,167 @@ _preflight_compose_vllm_subdir() {
   value="$(_preflight_compose_path_default "$1")"
   value="${value%%/*}"
   printf '%s' "$value"
+}
+
+_preflight_missing_rel() {
+  local model_dir="$1"
+  local item="$2"
+  local item_path="${item%% (*}"
+  local rel="${item_path#${model_dir}/}"
+  printf '%s' "$rel"
+}
+
+_preflight_list_has() {
+  local needle="$1"
+  shift
+  local value
+  for value in "$@"; do
+    [[ "$value" == "$needle" ]] && return 0
+  done
+  return 1
+}
+
+_preflight_hf_cli_available() {
+  command -v hf >/dev/null 2>&1 || command -v huggingface-cli >/dev/null 2>&1
+}
+
+_preflight_setup_root() {
+  if [[ -n "${ROOT_DIR:-}" ]]; then
+    printf '%s' "$ROOT_DIR"
+  else
+    cd -- "${_PREFLIGHT_DIR}/.." && pwd
+  fi
+}
+
+_preflight_weights_reader() {
+  local root_dir
+  root_dir="$(_preflight_setup_root)"
+  printf '%s' "${root_dir}/scripts/lib/profiles/weights.py"
+}
+
+_preflight_weight_recipe_for_path() {
+  local rel="$1"
+  local reader env_lines
+  reader="$(_preflight_weights_reader)"
+  command -v python3 >/dev/null 2>&1 || return 1
+  [[ -f "$reader" ]] || return 1
+  env_lines="$(python3 "$reader" lookup "$rel" 2>/dev/null)" || return 1
+  eval "$env_lines"
+}
+
+_preflight_weight_recipe_for_key() {
+  local key="$1"
+  local reader env_lines
+  reader="$(_preflight_weights_reader)"
+  command -v python3 >/dev/null 2>&1 || return 1
+  [[ -f "$reader" ]] || return 1
+  env_lines="$(python3 "$reader" entry "$key" 2>/dev/null)" || return 1
+  eval "$env_lines"
+}
+
+_preflight_weight_hf_command() {
+  local model_dir_expr="${1:-\$MODEL_DIR}"
+  [[ -n "${WEIGHT_REPO:-}" ]] || return 1
+  if [[ -n "${WEIGHT_FILES:-}" ]]; then
+    printf 'hf download %s %s --local-dir %s/%s' \
+      "$WEIGHT_REPO" "$WEIGHT_FILES" "$model_dir_expr" "$WEIGHT_SUBDIR"
+  else
+    printf 'hf download %s --local-dir %s/%s' \
+      "$WEIGHT_REPO" "$model_dir_expr" "$WEIGHT_SUBDIR"
+  fi
+}
+
+_preflight_weight_setup_command() {
+  [[ -n "${WEIGHT_SETUP_MODEL:-}" ]] || return 1
+  if [[ -n "${WEIGHT_SETUP_ENV:-}" ]]; then
+    printf '%s bash scripts/setup.sh %s' "$WEIGHT_SETUP_ENV" "$WEIGHT_SETUP_MODEL"
+  else
+    printf 'bash scripts/setup.sh %s' "$WEIGHT_SETUP_MODEL"
+  fi
+}
+
+_preflight_weight_hint_keys() {
+  local model_dir="$1"
+  shift
+  local item rel key
+  local keys=()
+
+  for item in "$@"; do
+    rel="$(_preflight_missing_rel "$model_dir" "$item")"
+    if _preflight_weight_recipe_for_path "$rel"; then
+      key="$WEIGHT_KEY"
+      if ! _preflight_list_has "$key" "${keys[@]}"; then
+        keys+=("$key")
+        printf '%s\n' "$key"
+      fi
+    fi
+  done
+}
+
+_preflight_print_weight_hints() {
+  local model_dir="$1"
+  shift
+  local key any_hint=0 setup_cmd hf_cmd
+
+  echo "[preflight]   If weights are already elsewhere, export MODEL_DIR=/path/to/models and retry." >&2
+  while IFS= read -r key; do
+    [[ -n "$key" ]] || continue
+    _preflight_weight_recipe_for_key "$key" || continue
+    any_hint=1
+    echo "[preflight]" >&2
+    echo "[preflight]   ${WEIGHT_LABEL:-$key}:" >&2
+    if hf_cmd="$(_preflight_weight_hf_command '$MODEL_DIR' 2>/dev/null)"; then
+      echo "[preflight]     ${hf_cmd}" >&2
+    fi
+    if setup_cmd="$(_preflight_weight_setup_command 2>/dev/null)"; then
+      echo "[preflight]     or: MODEL_DIR=${model_dir} ${setup_cmd}" >&2
+    fi
+    if [[ -n "${WEIGHT_MANUAL_NOTE:-}" ]]; then
+      echo "[preflight]     note: ${WEIGHT_MANUAL_NOTE}" >&2
+    fi
+  done < <(_preflight_weight_hint_keys "$model_dir" "$@")
+
+  if [[ "$any_hint" != "1" ]]; then
+    echo "[preflight]   Check the compose header for its model-specific hf download command." >&2
+  fi
+}
+
+_preflight_offer_fetch_missing() {
+  local compose_file="$1"
+  local model_dir="$2"
+  shift 2
+
+  [[ "${PREFLIGHT_NO_FETCH_PROMPT:-0}" != "1" ]] || return 1
+  [[ -t 0 && -t 1 ]] || return 1
+  _preflight_hf_cli_available || return 1
+
+  local key setup_cmd answer root_dir
+  local keys=()
+  while IFS= read -r key; do
+    [[ -n "$key" ]] || continue
+    _preflight_weight_recipe_for_key "$key" || continue
+    [[ -n "${WEIGHT_SETUP_MODEL:-}" ]] || continue
+    [[ -n "${WEIGHT_REPO:-}" ]] || continue
+    if ! _preflight_list_has "$key" "${keys[@]}"; then
+      keys+=("$key")
+    fi
+  done < <(_preflight_weight_hint_keys "$model_dir" "$@")
+
+  [[ ${#keys[@]} -gt 0 ]] || return 1
+
+  echo "[preflight]" >&2
+  read -r -p "[preflight] Fetch missing weights now with scripts/setup.sh? [y/N]: " answer
+  [[ "$answer" =~ ^[Yy]$ ]] || return 1
+
+  root_dir="$(_preflight_setup_root)"
+  for key in "${keys[@]}"; do
+    _preflight_weight_recipe_for_key "$key" || continue
+    local env_args=("MODEL_DIR=${model_dir}" "WEIGHT_KEY=${key}")
+    echo "[preflight] fetching ${WEIGHT_LABEL:-$key} ..." >&2
+    env "${env_args[@]}" bash "${root_dir}/scripts/setup.sh" "${WEIGHT_SETUP_MODEL}"
+  done
+
+  PREFLIGHT_NO_FETCH_PROMPT=1 preflight_compose_deps "$compose_file"
 }
 
 preflight_compose_deps() {
@@ -734,8 +906,10 @@ preflight_compose_deps() {
   done
   echo "[preflight]" >&2
   echo "[preflight] Fix:" >&2
-  echo "[preflight]   Check the compose header for its model-specific hf download command." >&2
-  echo "[preflight]   If weights are already elsewhere, export MODEL_DIR=/path/to/models and retry." >&2
+  _preflight_print_weight_hints "$model_dir" "${missing[@]}"
+  if _preflight_offer_fetch_missing "$compose_file" "$model_dir" "${missing[@]}"; then
+    return 0
+  fi
   echo "[preflight] Skip this check:  PREFLIGHT_NO_COMPOSE_DEPS=1 bash scripts/switch.sh ..." >&2
   return 1
 }

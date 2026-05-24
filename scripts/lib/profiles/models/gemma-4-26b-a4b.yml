@@ -27,20 +27,40 @@ vision_capable: true                  # multimodal — vision_config + audio_con
 weights:
   autoround_int4_mixed:
     path: gemma-4-26b-a4b-autoround-int4-mixed
+    local_subdir: gemma-4-26b-a4b-autoround-int4-mixed
     size_gb: 16.0                      # measured post-download 2026-05-15
     format: autoround
     status: ampere-blocked             # moe_intermediate_size=704 % group_size=128 = 5.5
-                                       # → Marlin K-dim alignment fails on SM86.
-                                       # Boots fine on SM90+ (Cutlass W4A8 / Machete).
+    hf_repo: Intel/gemma-4-26B-A4B-it-int4-mixed-AutoRound
     hf_repos:
       - Intel/gemma-4-26B-A4B-it-int4-mixed-AutoRound
+    engine: vllm
+    kind: main
+    verify_glob: "*.safetensors"
   awq_compressed_tensors:
     path: gemma-4-26b-a4b-awq-4bit
+    local_subdir: gemma-4-26b-a4b-awq-4bit
     size_gb: 17.0                      # measured post-download 2026-05-15
     format: compressed-tensors         # AWQ pack-quantized via vLLM compressed-tensors loader
     status: production                 # via vLLM PR #40886 overlay (Ampere-bootable)
+    hf_repo: cyankiwi/gemma-4-26B-A4B-it-AWQ-4bit
     hf_repos:
       - cyankiwi/gemma-4-26B-A4B-it-AWQ-4bit
+    engine: vllm
+    kind: main
+    verify_glob: "*.safetensors"
+    setup_weights_key: awq
+  assistant:
+    path: gemma-4-26b-a4b-it-assistant
+    local_subdir: gemma-4-26b-a4b-it-assistant
+    size_gb: 0.97
+    format: fp16
+    status: production
+    hf_repo: google/gemma-4-26B-A4B-it-assistant
+    engine: vllm
+    kind: draft
+    verify_glob: "*.safetensors"
+    setup_env: WITH_ASSISTANT_DRAFT=1
 default_weight_variant: awq_compressed_tensors
 compatible_drafters:
   - gemma-26b-it-assistant            # dedicated 26B-A4B MTP assistant (separate weights from 31B)

@@ -19,37 +19,130 @@ attention_k_eq_v: false
 weights:
   autoround_int4:
     path: qwen3.6-27b-autoround-int4
+    local_subdir: qwen3.6-27b-autoround-int4
     size_gb: 17.5
     format: autoround
     status: production
-    # v0.8.0 Pull-Gate Tier-1 lookup slugs (full HF repo ids).
+    hf_repo: Lorbus/Qwen3.6-27B-int4-AutoRound
     hf_repos:
       - Lorbus/Qwen3.6-27B-int4-AutoRound
       - Intel/Qwen3.6-27B-int4-AutoRound
+    engine: vllm
+    kind: main
+    verify_glob: "*.safetensors"
   awq:
     path: qwen3.6-27b-awq-int4
+    local_subdir: qwen3.6-27b-awq-int4
     size_gb: 17.0
     format: awq
     status: experimental
+    engine: vllm
+    kind: main
+    verify_glob: "*.safetensors"
+  dflash:
+    path: qwen3.6-27b-dflash
+    local_subdir: qwen3.6-27b-dflash
+    size_gb: 1.75
+    format: fp16
+    status: experimental
+    hf_repo: z-lab/Qwen3.6-27B-DFlash
+    engine: vllm
+    kind: draft
+    verify_glob: "*.safetensors"
+    setup_env: WITH_DFLASH_DRAFT=1
+  prism_eagle3:
+    path: qwen3.6-27b-prism-eagle3
+    local_subdir: qwen3.6-27b-prism-eagle3
+    size_gb: variable
+    format: safetensors
+    status: experimental
+    hf_repo: Ex0bit/Qwen3.6-27B-PRISM-EAGLE3
+    engine: sglang
+    kind: draft
+    verify_glob: "*.safetensors"
+    setup_env: WITH_PRISM_EAGLE3=1
+  mtp_head:
+    path: qwen3.6-27b-mtp-head
+    local_subdir: qwen3.6-27b-mtp-head
+    size_gb: variable
+    format: safetensors
+    status: historical
+    engine: vllm
+    kind: draft
+    verify_glob: "*.safetensors"
+    manual_note: "No direct download recipe is documented for qwen3.6-27b-mtp-head in this repo."
   gguf:
     path: qwen3.6-27b-gguf
+    local_subdir: qwen3.6-27b-gguf
     size_gb: variable
     format: gguf
     status: production
+    engine: llama-cpp
+    kind: gguf
+    verify_glob: "*.gguf"
+  gguf_q4km:
+    path: qwen3.6-27b-gguf/unsloth-mtp-q4km
+    local_subdir: qwen3.6-27b-gguf/unsloth-mtp-q4km
+    size_gb: variable
+    format: gguf
+    status: production
+    hf_repo: unsloth/Qwen3.6-27B-MTP-GGUF
+    files:
+      - Qwen3.6-27B-Q4_K_M.gguf
+    engine: llama-cpp
+    kind: gguf
+    verify_glob: "*.gguf"
+    setup_weights_key: gguf
+  gguf_mmproj_f16:
+    path: qwen3.6-27b-gguf
+    local_subdir: qwen3.6-27b-gguf
+    size_gb: variable
+    format: gguf
+    status: production
+    hf_repo: unsloth/Qwen3.6-27B-GGUF
+    files:
+      - mmproj-F16.gguf
+    engine: llama-cpp
+    kind: mmproj
+    verify_glob: "*.gguf"
+    setup_weights_key: gguf
+  gguf_iq4ks:
+    path: qwen3.6-27b-gguf/ubergarm-mtp-iq4ks
+    local_subdir: qwen3.6-27b-gguf/ubergarm-mtp-iq4ks
+    size_gb: variable
+    format: gguf
+    status: production
+    hf_repo: ubergarm/Qwen3.6-27B-GGUF
+    files:
+      - Qwen3.6-27B-MTP-IQ4_KS.gguf
+    engine: ik-llama
+    kind: gguf
+    verify_glob: "*.gguf"
+    setup_weights_key: iq4ks
   carnice_bf16mtp:
     path: carnice-v2-27b-int4-recipe-d-bf16mtp
+    local_subdir: carnice-v2-27b-int4-recipe-d-bf16mtp
     size_gb: 17.5
     format: autoround
     status: experimental
+    hf_repo: wasifb/Carnice_V2_27B_INT4_BF16MTP
     hf_repos:
       - wasifb/Carnice_V2_27B_INT4_BF16MTP
+    engine: vllm
+    kind: main
+    verify_glob: "*.safetensors"
   qwopus_bf16mtp:
     path: qwopus3.6-27b-int4-recipe-d-bf16mtp
+    local_subdir: qwopus3.6-27b-int4-recipe-d-bf16mtp
     size_gb: 17.5
     format: autoround
     status: experimental
     hf_repos:
       - Jackrong/Qwopus3.6-27B-v1-preview
+    engine: vllm
+    kind: main
+    verify_glob: "*.safetensors"
+    manual_note: "This compose expects a local Recipe-D INT4+BF16MTP artifact. The repo only documents the BF16 source Jackrong/Qwopus3.6-27B-v1-preview, not a directly downloadable packed artifact."
 default_weight_variant: autoround_int4
 compatible_drafters:
   - qwen-mtp-builtin

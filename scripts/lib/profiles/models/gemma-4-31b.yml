@@ -17,23 +17,59 @@ attention_k_eq_v: true
 weights:
   autoround_int4:
     path: gemma-4-31b-autoround-int4
+    local_subdir: gemma-4-31b-autoround-int4
     size_gb: 18.0
     format: autoround
     status: production
+    hf_repo: Intel/gemma-4-31B-it-int4-AutoRound
     hf_repos:
       - Intel/gemma-4-31B-it-int4-AutoRound
+    engine: vllm
+    kind: main
+    verify_glob: "*.safetensors"
   awq:
     path: gemma-4-31b-it-AWQ-4bit
+    local_subdir: gemma-4-31b-it-AWQ-4bit
     size_gb: 17.0
     format: awq
     status: production
+    hf_repo: cyankiwi/gemma-4-31B-it-AWQ-4bit
     hf_repos:
       - cyankiwi/gemma-4-31B-it-AWQ-4bit
+    engine: vllm
+    kind: main
+    verify_glob: "*.safetensors"
+    setup_weights_key: awq
+  assistant:
+    path: gemma-4-31b-it-assistant
+    local_subdir: gemma-4-31b-it-assistant
+    size_gb: 0.97
+    format: fp16
+    status: production
+    hf_repo: google/gemma-4-31B-it-assistant
+    engine: vllm
+    kind: draft
+    verify_glob: "*.safetensors"
+  dflash:
+    path: gemma-4-31b-it-dflash
+    local_subdir: gemma-4-31b-it-dflash
+    size_gb: 2.9
+    format: fp16
+    status: experimental
+    hf_repo: z-lab/gemma-4-31b-it-dflash
+    engine: vllm
+    kind: draft
+    verify_glob: "*.safetensors"
+    setup_env: WITH_DFLASH_DRAFT=1
   bf16:
     path: gemma-4-31b-bf16
+    local_subdir: gemma-4-31b-bf16
     size_gb: 58.0
     format: bf16
     status: historical
+    engine: vllm
+    kind: main
+    verify_glob: "*.safetensors"
 default_weight_variant: autoround_int4
 compatible_drafters:
   - gemma-it-assistant

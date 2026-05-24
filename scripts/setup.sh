@@ -5,10 +5,8 @@
 #   bash scripts/setup.sh                # interactive model picker in a TTY
 #   bash scripts/setup.sh <model-name>   # scripted/CI positional form
 #
-# Currently supported:
-#   qwen3.6-27b   →  Lorbus/Qwen3.6-27B-int4-AutoRound + Genesis patches
-#   gemma-4-31b   →  Intel/gemma-4-31B-it-int4-AutoRound + Google MTP "assistant"
-#                    drafter (no Genesis — not yet integrated upstream as of v7.72.2)
+# Currently supported model families are listed in usage(). Exact repositories,
+# files, and local subdirectories live in scripts/lib/profiles/models/*.yml.
 #
 # What it does (per supported model):
 #   - clones Sandermage/genesis-vllm-patches into models/<model>/vllm/patches/genesis
@@ -29,9 +27,9 @@
 #   HF_TOKEN            HF token (public models, usually unnecessary)
 #   SKIP_MODEL          Set to 1 to skip the model download step
 #   SKIP_GENESIS        Set to 1 to skip cloning Genesis patches
-#   WITH_DFLASH_DRAFT   Set to 1 to ALSO download z-lab/Qwen3.6-27B-DFlash
-#                       (~1.75 GB; required ONLY for dual-dflash.yml /
-#                       dual-dflash-noviz.yml composes). Default: 0.
+#   WITH_DFLASH_DRAFT   Set to 1 to ALSO download the model family's DFlash
+#                       drafter when one is registered in profiles/models/*.yml.
+#                       Default: 0.
 #                       Note: draft model is still under training as of
 #                       2026-04-26; bench numbers in DUAL_CARD.md were
 #                       measured against that snapshot. AL improvements
@@ -44,6 +42,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+WEIGHTS_READER="${ROOT_DIR}/scripts/lib/profiles/weights.py"
 
 usage() {
   echo "Usage: $0 <model-name>"
@@ -54,15 +53,50 @@ usage() {
   echo ""
   echo "Supported model names:"
   echo "  qwen3.6-27b"
+  echo "  qwen3.6-35b-a3b"
   echo "  gemma-4-31b"
+  echo "  gemma-4-26b-a4b"
+  echo ""
+  echo "Exact catalog entry fetch: WEIGHT_KEY=<registry-key> $0 <model-name>"
 }
 
 model_label() {
   case "$1" in
     qwen3.6-27b) echo "Qwen 3.6 27B" ;;
+    qwen3.6-35b-a3b) echo "Qwen 3.6 35B-A3B" ;;
     gemma-4-31b) echo "Gemma 4 31B" ;;
+    gemma-4-26b-a4b) echo "Gemma 4 26B-A4B" ;;
     *) echo "$1" ;;
   esac
+}
+
+load_weight_recipe() {
+  local key="$1"
+  local env_lines
+  command -v python3 >/dev/null 2>&1 || {
+    echo "ERROR: python3 is required to read profile weight recipes." >&2
+    exit 1
+  }
+  env_lines="$(python3 "${WEIGHTS_READER}" entry "$key" 2>/dev/null)" || {
+    echo "ERROR: could not resolve weight recipe '${key}' from scripts/lib/profiles/models/*.yml." >&2
+    echo "       Install python3-yaml/PyYAML if missing, or check the catalog key." >&2
+    exit 1
+  }
+  eval "$env_lines"
+  if [[ -n "${WEIGHT_MODEL:-}" && "${WEIGHT_MODEL}" != "${MODEL_NAME}" ]]; then
+    echo "ERROR: weight recipe '${key}' belongs to ${WEIGHT_MODEL}, not ${MODEL_NAME}." >&2
+    exit 1
+  fi
+  if [[ -z "${WEIGHT_REPO:-}" ]]; then
+    echo "ERROR: weight recipe '${key}' has no direct download recipe." >&2
+    [[ -n "${WEIGHT_MANUAL_NOTE:-}" ]] && echo "       ${WEIGHT_MANUAL_NOTE}" >&2
+    exit 1
+  fi
+  MODEL_REPO="${WEIGHT_REPO}"
+  MODEL_SUBDIR="${WEIGHT_SUBDIR}"
+  GGUF_FILES="${WEIGHT_FILES}"
+  VERIFY_GLOB="${WEIGHT_VERIFY_GLOB:-*.safetensors}"
+  echo "[model]   ${WEIGHT_KEY} -> ${MODEL_REPO} ${WEIGHT_FILES} -> ${MODEL_SUBDIR}"
 }
 
 model_picker_line() {
@@ -128,71 +162,94 @@ else
   SETUP_BOTH_MODE=0
 fi
 
-# ALWAYS_DRAFT_REPO + ALWAYS_DRAFT_SUBDIR: a drafter that this model REQUIRES
-# (vs the optional WITH_DFLASH_DRAFT path). Empty for Qwen3.6 (no required
-# drafter); Google MTP drafter for Gemma 4 (canonical recipe per Gemma 4 docs +
-# our dual.yml compose).
-ALWAYS_DRAFT_REPO=""
-ALWAYS_DRAFT_SUBDIR=""
-
-# Per-model dflash drafter info (overrides defaults set later for non-qwen3.6).
-DFLASH_REPO_OVERRIDE=""
-DFLASH_SUBDIR_OVERRIDE=""
+# The profile YAMLs are the only source of download recipes. setup.sh only
+# maps friendly setup knobs (MODEL_NAME, WEIGHTS, WITH_*) to profile keys.
+ALWAYS_DRAFT_KEY=""
+DFLASH_KEY=""
+PRIMARY_WEIGHT_KEY=""
+EXTRA_WEIGHT_KEYS=()
+NEEDS_GENESIS=0
 
 case "${MODEL_NAME}" in
   qwen3.6-27b)
-    MODEL_REPO="Lorbus/Qwen3.6-27B-int4-AutoRound"
-    MODEL_SUBDIR="qwen3.6-27b-autoround-int4"
+    PRIMARY_WEIGHT_KEY="qwen3.6-27b:autoround_int4"
+    DFLASH_KEY="qwen3.6-27b:dflash"
     NEEDS_GENESIS=1
     ;;
+  qwen3.6-35b-a3b)
+    PRIMARY_WEIGHT_KEY="qwen3.6-35b-a3b:autoround_int4"
+    ;;
   gemma-4-31b)
-    MODEL_REPO="Intel/gemma-4-31B-it-int4-AutoRound"
-    MODEL_SUBDIR="gemma-4-31b-autoround-int4"
-    # Gemma 4 isn't Genesis-integrated yet — Sander's roadmap (disc #19) lists
-    # Gemma 4 as a follow-up. Until v7.73.x or later integrates it, skip Genesis
-    # entirely on this path.
-    NEEDS_GENESIS=0
-    # Google ships the MTP drafter with the canonical Gemma 4 recipe; our
-    # dual.yml compose requires it. Always-fetch (no opt-in flag).
-    ALWAYS_DRAFT_REPO="google/gemma-4-31B-it-assistant"
-    ALWAYS_DRAFT_SUBDIR="gemma-4-31b-it-assistant"
-    # DFlash drafter is z-lab/gemma-4-31B-it-DFlash (different repo than
-    # Qwen3.6's z-lab/Qwen3.6-27B-DFlash).
-    DFLASH_REPO_OVERRIDE="z-lab/gemma-4-31B-it-dflash"
-    DFLASH_SUBDIR_OVERRIDE="gemma-4-31b-it-dflash"
+    PRIMARY_WEIGHT_KEY="gemma-4-31b:autoround_int4"
+    ALWAYS_DRAFT_KEY="gemma-4-31b:assistant"
+    DFLASH_KEY="gemma-4-31b:dflash"
+    ;;
+  gemma-4-26b-a4b)
+    PRIMARY_WEIGHT_KEY="gemma-4-26b-a4b:autoround_int4_mixed"
     ;;
   *)
     echo "ERROR: unsupported model '${MODEL_NAME}'."
-    echo "Supported: qwen3.6-27b, gemma-4-31b"
-    echo "(To add a new model, extend the case dispatch in scripts/setup.sh)"
+    echo "Supported: qwen3.6-27b, qwen3.6-35b-a3b, gemma-4-31b, gemma-4-26b-a4b"
+    echo "(To add a new model, extend the model dispatch in scripts/setup.sh and profiles/models/*.yml)"
     exit 1
     ;;
 esac
 
-# ---------- Weights format (autoround vLLM default, or gguf for llama.cpp/ik_llama) ----------
-# WEIGHTS=gguf swaps the AutoRound vLLM repo above for the llama.cpp GGUF and
-# downloads just the file(s) it needs (a GGUF repo holds many quants). The
-# GGUF/llama.cpp path doesn't use Genesis. Default is unchanged (autoround).
+# ---------- Weights format / exact registry entry ----------
+# WEIGHTS selects a common weight variant for the model family. WEIGHT_KEY is
+# the exact catalog-entry path used by preflight's fetch-now flow.
 WEIGHTS="${WEIGHTS:-autoround}"
-GGUF_FILES=""   # empty → download whole repo dir (autoround); non-empty → specific files
-if [[ "${WEIGHTS}" == "gguf" ]]; then
+GGUF_FILES=""
+VERIFY_GLOB="*.safetensors"
+
+if [[ -n "${WEIGHT_KEY:-}" ]]; then
+  PRIMARY_WEIGHT_KEY="${WEIGHT_KEY}"
+elif [[ "${WEIGHTS}" == "gguf" ]]; then
   case "${MODEL_NAME}" in
     qwen3.6-27b)
-      MODEL_REPO="unsloth/Qwen3.6-27B-GGUF"
-      MODEL_SUBDIR="qwen3.6-27b-gguf/unsloth-mtp-q4km"
-      GGUF_FILES="Qwen3.6-27B-Q4_K_M.gguf mmproj-F16.gguf"  # Q4_K_M MTP + vision mmproj
+      PRIMARY_WEIGHT_KEY="qwen3.6-27b:gguf_q4km"
+      EXTRA_WEIGHT_KEYS+=("qwen3.6-27b:gguf_mmproj_f16")
       NEEDS_GENESIS=0
       ;;
     *)
       echo "ERROR: WEIGHTS=gguf is only wired for qwen3.6-27b right now." >&2
-      echo "       Use WEIGHTS=autoround (default), or download the GGUF manually." >&2
+      echo "       Use WEIGHT_KEY=<model>:<variant> for exact catalog entries." >&2
       exit 1 ;;
   esac
-  echo "[model]   WEIGHTS=gguf → ${MODEL_REPO} (${GGUF_FILES}) → ${MODEL_SUBDIR}"
+elif [[ "${WEIGHTS}" == "iq4ks" ]]; then
+  case "${MODEL_NAME}" in
+    qwen3.6-27b)
+      PRIMARY_WEIGHT_KEY="qwen3.6-27b:gguf_iq4ks"
+      NEEDS_GENESIS=0
+      ;;
+    *)
+      echo "ERROR: WEIGHTS=iq4ks is only wired for qwen3.6-27b." >&2
+      exit 1 ;;
+  esac
+elif [[ "${WEIGHTS}" == "awq" ]]; then
+  case "${MODEL_NAME}" in
+    gemma-4-31b) PRIMARY_WEIGHT_KEY="gemma-4-31b:awq" ;;
+    gemma-4-26b-a4b) PRIMARY_WEIGHT_KEY="gemma-4-26b-a4b:awq_compressed_tensors" ;;
+    *)
+      echo "ERROR: WEIGHTS=awq is only wired for gemma-4-31b and gemma-4-26b-a4b." >&2
+      exit 1 ;;
+  esac
 elif [[ "${WEIGHTS}" != "autoround" ]]; then
-  echo "ERROR: WEIGHTS='${WEIGHTS}' not recognized (use 'autoround' or 'gguf')." >&2
+  echo "ERROR: WEIGHTS='${WEIGHTS}' not recognized (use 'autoround', 'awq', 'gguf', or 'iq4ks')." >&2
   exit 1
 fi
+
+if [[ "${WITH_ASSISTANT_DRAFT:-0}" == "1" ]]; then
+  case "${MODEL_NAME}" in
+    gemma-4-31b) ALWAYS_DRAFT_KEY="gemma-4-31b:assistant" ;;
+    gemma-4-26b-a4b) ALWAYS_DRAFT_KEY="gemma-4-26b-a4b:assistant" ;;
+    *)
+      echo "ERROR: WITH_ASSISTANT_DRAFT=1 is only wired for Gemma models." >&2
+      exit 1 ;;
+  esac
+fi
+
+load_weight_recipe "${PRIMARY_WEIGHT_KEY}"
 
 # ---------- MODEL_DIR resolution ----------
 # Order of precedence:
@@ -429,132 +486,118 @@ if [[ "${SKIP_MODEL:-0}" == "1" ]]; then
   exit 0
 fi
 
-mkdir -p "${MODEL_DIR}/${MODEL_SUBDIR}"
-
-# Prefer `hf` CLI if available (faster with hf_transfer); fall back to curl.
-download_via_hf() {
-  echo "[model]   Using 'hf download' (hf_transfer if available) ..."
-  # ${GGUF_FILES} is intentionally unquoted: empty (autoround) → whole-repo
-  # download as before; set (gguf) → just those file(s) word-split as args.
-  HF_HUB_ENABLE_HF_TRANSFER=1 HF_HUB_DISABLE_XET=1 \
-    hf download "${MODEL_REPO}" ${GGUF_FILES} --local-dir "${MODEL_DIR}/${MODEL_SUBDIR}"
+_hf_download_repo() {
+  local repo="$1"
+  local subdir="$2"
+  local files="${3:-}"
+  mkdir -p "${MODEL_DIR}/${subdir}"
+  if command -v hf >/dev/null 2>&1; then
+    echo "[model]   Using 'hf download' (hf_transfer if available) ..."
+    # files is intentionally word-split: empty -> whole repo; non-empty -> selected files.
+    HF_HUB_ENABLE_HF_TRANSFER=1 HF_HUB_DISABLE_XET=1 \
+      hf download "$repo" ${files} --local-dir "${MODEL_DIR}/${subdir}"
+  elif command -v huggingface-cli >/dev/null 2>&1; then
+    echo "[model]   Using 'huggingface-cli download' ..."
+    HF_HUB_ENABLE_HF_TRANSFER=1 HF_HUB_DISABLE_XET=1 \
+      huggingface-cli download "$repo" ${files} --local-dir "${MODEL_DIR}/${subdir}"
+  else
+    echo "ERROR: neither 'hf' nor 'huggingface-cli' found. Install with:" >&2
+    echo "  pip install 'huggingface-hub[hf_transfer]'" >&2
+    echo "or:" >&2
+    echo "  uv tool install --with hf_transfer huggingface-hub" >&2
+    exit 1
+  fi
 }
 
-if command -v hf >/dev/null 2>&1; then
-  download_via_hf
-elif command -v huggingface-cli >/dev/null 2>&1; then
-  echo "[model]   Using 'huggingface-cli download' ..."
-  HF_HUB_ENABLE_HF_TRANSFER=1 HF_HUB_DISABLE_XET=1 \
-    huggingface-cli download "${MODEL_REPO}" ${GGUF_FILES} --local-dir "${MODEL_DIR}/${MODEL_SUBDIR}"
-else
-  echo "ERROR: neither 'hf' nor 'huggingface-cli' found. Install with:" >&2
-  echo "  pip install 'huggingface-hub[hf_transfer]'" >&2
-  echo "or:" >&2
-  echo "  uv tool install --with hf_transfer huggingface-hub" >&2
-  exit 1
-fi
+_verify_downloaded_files() {
+  local repo="$1"
+  local subdir="$2"
+  local verify_glob="$3"
+  local fail=0 count=0 f expected actual
 
-# ---------- SHA verification ----------
-VERIFY_GLOB="*.safetensors"; [[ "${WEIGHTS}" == "gguf" ]] && VERIFY_GLOB="*.gguf"
-echo "[verify]  Checking SHA256 of every ${VERIFY_GLOB} against HF x-linked-etag ..."
-cd "${MODEL_DIR}/${MODEL_SUBDIR}"
+  echo "[verify]  Checking SHA256 of every ${verify_glob} against HF x-linked-etag ..."
+  cd "${MODEL_DIR}/${subdir}"
+  for f in ${verify_glob}; do
+    [[ -f "$f" ]] || continue
+    count=$((count + 1))
+    expected="$(curl -sfI "https://huggingface.co/${repo}/resolve/main/$f" \
+      | grep -i '^x-linked-etag:' | tr -d '"\r' | awk '{print $NF}' || true)"
+    actual="$(sha256sum "$f" | awk '{print $1}')"
+    if [[ -z "$expected" ]]; then
+      printf "  %-50s SKIP (no etag)\n" "$f"
+    elif [[ "$expected" == "$actual" ]]; then
+      printf "  %-50s OK\n" "$f"
+    else
+      printf "  %-50s FAIL  exp=%.12s  act=%.12s\n" "$f" "$expected" "$actual"
+      fail=$((fail + 1))
+    fi
+  done
+  cd "${ROOT_DIR}"
 
-fail=0
-count=0
-for f in ${VERIFY_GLOB}; do
-  [[ -f "$f" ]] || continue
-  count=$((count + 1))
-  expected="$(curl -sfI "https://huggingface.co/${MODEL_REPO}/resolve/main/$f" \
-    | grep -i '^x-linked-etag:' | tr -d '"\r' | awk '{print $NF}' || true)"
-  actual="$(sha256sum "$f" | awk '{print $1}')"
-  if [[ -z "$expected" ]]; then
-    printf "  %-50s SKIP (no etag)\n" "$f"
-  elif [[ "$expected" == "$actual" ]]; then
-    printf "  %-50s OK\n" "$f"
-  else
-    printf "  %-50s FAIL  exp=%.12s  act=%.12s\n" "$f" "$expected" "$actual"
-    fail=$((fail + 1))
+  if [[ "$fail" != "0" ]]; then
+    echo "[verify]  ${fail} file(s) failed SHA check." >&2
+    echo "          Delete ${MODEL_DIR}/${subdir} and re-run setup.sh." >&2
+    exit 1
   fi
+  if [[ "$count" == "0" ]]; then
+    echo "[verify]  No ${verify_glob} found in ${MODEL_DIR}/${subdir} — download may have failed." >&2
+    exit 1
+  fi
+  echo "[done]    ${count} file(s) SHA-verified in ${subdir}."
+}
+
+download_weight_key() {
+  local key="$1"
+  load_weight_recipe "$key"
+  echo "[model]   Downloading ${WEIGHT_LABEL:-$key} ..."
+  _hf_download_repo "$WEIGHT_REPO" "$WEIGHT_SUBDIR" "$WEIGHT_FILES"
+  _verify_downloaded_files "$WEIGHT_REPO" "$WEIGHT_SUBDIR" "$WEIGHT_VERIFY_GLOB"
+}
+
+VERIFY_GLOB="${VERIFY_GLOB_OVERRIDE:-*.safetensors}"
+_hf_download_repo "${MODEL_REPO}" "${MODEL_SUBDIR}" "${GGUF_FILES}"
+_verify_downloaded_files "${MODEL_REPO}" "${MODEL_SUBDIR}" "${VERIFY_GLOB}"
+
+for extra_key in "${EXTRA_WEIGHT_KEYS[@]}"; do
+  download_weight_key "$extra_key"
 done
-cd "${ROOT_DIR}"
-
-if [[ "$fail" != "0" ]]; then
-  echo "[verify]  ${fail} shard(s) failed SHA check." >&2
-  echo "          Delete ${MODEL_DIR}/${MODEL_SUBDIR} and re-run setup.sh." >&2
-  exit 1
-fi
-
-if [[ "$count" == "0" ]]; then
-  echo "[verify]  No ${VERIFY_GLOB} found in ${MODEL_DIR}/${MODEL_SUBDIR} — download may have failed." >&2
-  exit 1
-fi
 
 echo ""
-echo "[done]    ${count} file(s) SHA-verified."
 [[ -d "${GENESIS_DIR}/.git" ]] && echo "          Genesis pinned at ${GENESIS_PIN} ($(cd "${GENESIS_DIR}" && git rev-parse --short HEAD))."
 echo ""
 
-# ---------- Optional DFlash draft model ----------
-# Required ONLY for `dual/dflash.yml` / `dual-dflash-noviz.yml`.
-# vLLM `method:"dflash"` spec-decode loads this as the draft. The compose
-# expects it at <MODEL_DIR>/qwen3.6-27b-dflash/ (~1.75 GB / card after load).
-#
-# Caveat: as of 2026-04-26, z-lab/Qwen3.6-27B-DFlash is still under training.
-# Published bench in docs/DUAL_CARD.md (82 narr / 125 code TPS on dual-3090)
-# was measured against the 2026-04-26 snapshot at peak code-prompt conditions.
-# Real agent traffic (mixed code + narrative + tool schemas) will see lower
-# AL until z-lab tags training-complete. See docs/UPSTREAM.md for the watch
-# entry and re-test trigger.
-# Per-model DFlash repo + subdir defaults. Override (Gemma 4) set in the case
-# dispatch above.
-DFLASH_REPO="${DFLASH_REPO_OVERRIDE:-z-lab/Qwen3.6-27B-DFlash}"
-DFLASH_SUBDIR="${DFLASH_SUBDIR_OVERRIDE:-qwen3.6-27b-dflash}"
-
-# Always-required drafter (Gemma 4 MTP "assistant"). Empty for models without
-# a canonical drafter shipped alongside the target weights (Qwen3.6).
-if [[ -n "${ALWAYS_DRAFT_REPO}" ]] && [[ "${SKIP_MODEL:-0}" != "1" ]]; then
-  if [[ -d "${MODEL_DIR}/${ALWAYS_DRAFT_SUBDIR}" ]] \
-     && find "${MODEL_DIR}/${ALWAYS_DRAFT_SUBDIR}" -name "*.safetensors" -print -quit | grep -q .; then
-    echo "[draft]   ${MODEL_DIR}/${ALWAYS_DRAFT_SUBDIR} already has weights — skipping."
-  else
-    echo "[draft]   Downloading required drafter ${ALWAYS_DRAFT_REPO} ..."
-    mkdir -p "${MODEL_DIR}/${ALWAYS_DRAFT_SUBDIR}"
-    if command -v hf >/dev/null 2>&1; then
-      HF_HUB_ENABLE_HF_TRANSFER=1 HF_HUB_DISABLE_XET=1 \
-        hf download "${ALWAYS_DRAFT_REPO}" --local-dir "${MODEL_DIR}/${ALWAYS_DRAFT_SUBDIR}"
-    elif command -v huggingface-cli >/dev/null 2>&1; then
-      HF_HUB_ENABLE_HF_TRANSFER=1 HF_HUB_DISABLE_XET=1 \
-        huggingface-cli download "${ALWAYS_DRAFT_REPO}" --local-dir "${MODEL_DIR}/${ALWAYS_DRAFT_SUBDIR}"
-    else
-      echo "[draft]   ERROR: neither 'hf' nor 'huggingface-cli' available — cannot download drafter." >&2
-      exit 1
-    fi
-    echo "[draft]   Downloaded ${ALWAYS_DRAFT_REPO} to ${MODEL_DIR}/${ALWAYS_DRAFT_SUBDIR}"
-  fi
+# ---------- Optional / companion draft models ----------
+if [[ -n "${ALWAYS_DRAFT_KEY:-}" ]] && [[ "${SKIP_MODEL:-0}" != "1" ]]; then
+  echo "[draft]   downloading required companion drafter ${ALWAYS_DRAFT_KEY} ..."
+  download_weight_key "${ALWAYS_DRAFT_KEY}"
   echo ""
 fi
 
 if [[ "${WITH_DFLASH_DRAFT:-0}" == "1" ]] && [[ "${SKIP_MODEL:-0}" != "1" ]]; then
-  echo "[dflash]  WITH_DFLASH_DRAFT=1 — downloading ${DFLASH_REPO} ..."
-  mkdir -p "${MODEL_DIR}/${DFLASH_SUBDIR}"
-  if command -v hf >/dev/null 2>&1; then
-    HF_HUB_ENABLE_HF_TRANSFER=1 HF_HUB_DISABLE_XET=1 \
-      hf download "${DFLASH_REPO}" --local-dir "${MODEL_DIR}/${DFLASH_SUBDIR}"
-  elif command -v huggingface-cli >/dev/null 2>&1; then
-    HF_HUB_ENABLE_HF_TRANSFER=1 HF_HUB_DISABLE_XET=1 \
-      huggingface-cli download "${DFLASH_REPO}" --local-dir "${MODEL_DIR}/${DFLASH_SUBDIR}"
-  else
-    echo "[dflash]  ERROR: neither 'hf' nor 'huggingface-cli' available — cannot download DFlash draft." >&2
+  if [[ -z "${DFLASH_KEY:-}" ]]; then
+    echo "ERROR: WITH_DFLASH_DRAFT=1 is not wired for ${MODEL_NAME}." >&2
     exit 1
   fi
-  echo "[dflash]  Downloaded ${DFLASH_REPO} to ${MODEL_DIR}/${DFLASH_SUBDIR}"
-elif [[ -d "${MODEL_DIR}/${DFLASH_SUBDIR}" ]]; then
-  echo "[dflash]  ${MODEL_DIR}/${DFLASH_SUBDIR} already exists — using existing draft."
+  echo "[dflash]  WITH_DFLASH_DRAFT=1 — downloading ${DFLASH_KEY} ..."
+  download_weight_key "${DFLASH_KEY}"
+  echo ""
 else
-  echo "[dflash]  Skipping DFlash draft model. Set WITH_DFLASH_DRAFT=1 to fetch"
-  echo "          ${DFLASH_REPO} (~1.75 GB; required only for dual-dflash composes)."
+  echo "[dflash]  Skipping DFlash draft model. Set WITH_DFLASH_DRAFT=1 to fetch it when a matching compose requires it."
 fi
+
 echo ""
+
+if [[ "${WITH_PRISM_EAGLE3:-0}" == "1" ]] && [[ "${SKIP_MODEL:-0}" != "1" ]]; then
+  case "${MODEL_NAME}" in
+    qwen3.6-27b)
+      download_weight_key qwen3.6-27b:prism_eagle3
+      ;;
+    *)
+      echo "ERROR: WITH_PRISM_EAGLE3=1 is only wired for qwen3.6-27b." >&2
+      exit 1 ;;
+  esac
+  echo ""
+fi
 
 # Note: vllm#40361 Marlin pad-sub-tile-n patched files are vendored in-repo
 # at models/qwen3.6-27b/vllm/patches/vllm-marlin-pad/. Dual-card composes
@@ -584,6 +627,23 @@ case "${MODEL_NAME}" in
   bash scripts/switch.sh vllm/gemma-mtp        # MTP drafter, TP=2, port 8030 (recommended)
   bash scripts/switch.sh vllm/gemma-mtp-tp1    # MTP drafter, TP=1 (single-card; upstream-blocked on Ampere fp8)
   bash scripts/switch.sh vllm/gemma-dflash     # DFlash drafter, TP=2, port 8032 (requires WITH_DFLASH_DRAFT=1)"
+    ;;
+  gemma-4-26b-a4b)
+    SAMPLE_CONTAINER="vllm-gemma-4-26b-a4b"
+    SAMPLE_COMPOSE_FLAGS_DUAL=""
+    SAMPLE_PORT="8035"
+    SAMPLE_MODEL_NAME="gemma-4-26b-a4b"
+    NEXT_STEPS_NOTE="Available variants:
+  bash scripts/switch.sh vllm/gemma-26b-awq
+  WITH_ASSISTANT_DRAFT=1 bash scripts/setup.sh gemma-4-26b-a4b  # fetch MTP assistant if using awq-mtp"
+    ;;
+  qwen3.6-35b-a3b)
+    SAMPLE_CONTAINER="vllm-qwen36-35b-a3b"
+    SAMPLE_COMPOSE_FLAGS_DUAL=""
+    SAMPLE_PORT="8040"
+    SAMPLE_MODEL_NAME="qwen3.6-35b-a3b-autoround"
+    NEXT_STEPS_NOTE="Preview variants:
+  bash scripts/switch.sh vllm/qwen35-preview"
     ;;
 esac
 
