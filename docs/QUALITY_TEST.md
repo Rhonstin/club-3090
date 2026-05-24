@@ -11,7 +11,7 @@ verify.sh         — fast smoke (15s,        "does it serve")
 verify-full.sh    — functional (1-2min,     "does everything work")
 verify-stress.sh  — boundary (5-10min,      "does it survive stress")
 bench.sh          — throughput (3-5min,     "what's the TPS")
-quality-test.sh   — behavioral (10-30min,   "does it produce useful output")  ← THIS
+quality-test.sh   — behavioral (10-90min,   "does it produce useful output")  ← THIS
 soak-test.sh      — stability (30-60min,    "does it stay healthy over time")
 ```
 
@@ -39,6 +39,15 @@ Three **sandboxed** packs add execution-backed verification via Docker sandboxes
 
 A separate eval-expansion pack, **AiderPolyglot-30** (multi-language code editing across cpp/go/java/js/python/rust), runs *independently* — not bundled into `--quick`/`--medium`/`--full`. Drive it via `benchlocal-cli run --pack aider-polyglot-30 --enable-sandboxed-packs`, or as the `aider` leg of [`rebench-full.sh`](../scripts/rebench-full.sh).
 
+The **reasoning suite** is also separate from `--full`; run it with `--reasoning` when you specifically want code/math/science reasoning signal under thinking-on pack defaults:
+
+| Pack | Verifier | Why it matters for club-3090 users |
+|---|---|---|
+| **HumanEval+-30** | Code execution sandbox over HumanEval+ functional tests | Small Python coding tasks; catches code-reasoning regressions quickly. |
+| **LiveCodeBench-v6-30** | Code execution sandbox over public LCB functional tests | Harder post-2025 coding tasks; exposes budget runaway and algorithmic failures. |
+| **GSM-Symbolic-30** | Deterministic `answer_match` exact numeric scoring | Symbolic grade-school math without LLM-as-judge. |
+| **GPQA-Diamond** | Deterministic `answer_match` exact letter scoring | Science QA placeholder; gated metadata-only until dataset access is materialized, so it reports `dataset-unavailable` instead of committing restricted data. |
+
 ## Modes
 
 | Mode | Packs | Budget | When to run |
@@ -46,8 +55,9 @@ A separate eval-expansion pack, **AiderPolyglot-30** (multi-language code editin
 | `--quick` | ToolCall + InstructFollow (2) | ~10-15 min | Per-commit gate; pre-push smoke. The two packs that catch the highest-value regressions for IDE-agent users. No Docker. |
 | `--medium` (default) | + StructOutput + DataExtract + ReasonMath (5) | ~25-30 min | Pre-release; pin bumps; new compose authoring. Generates the `Quality:` line for the compose schema. No Docker. |
 | `--full` | + BugFind + HermesAgent + CLI (8) | ~45-60 min | Cross-rig comparison; quality A/B vs another quant. **The 3 added packs are Docker-sandboxed — needs Docker.** |
+| `--reasoning` | HumanEval+ + LiveCodeBench v6 + GSM-Symbolic + GPQA-Diamond metadata (4) | ~30-90+ min | Dedicated reasoning/code suite. Thinking defaults on for all 4 packs; HumanEval+ and LCB need Docker. |
 
-`--full` runs the sandbox packs by default. `--no-sandboxed` drops `--full` back to the 5-pack deterministic scope (no Docker); `--sandboxed-only` runs just the 3 sandbox packs.
+`--full` runs the sandbox packs by default. `--no-sandboxed` drops `--full` back to the 5-pack deterministic scope (no Docker); `--sandboxed-only` runs just the 3 sandbox packs. `--reasoning` is independent of `--full`; use it for the four reasoning packs, with GPQA skipped until gated data is available.
 
 ## Install (one-time)
 
@@ -73,6 +83,9 @@ bash scripts/quality-test.sh --quick
 # full mode (pin bumps, cross-rig comparison)
 bash scripts/quality-test.sh --full
 
+# dedicated reasoning suite (thinking-on pack defaults; code packs need Docker)
+bash scripts/quality-test.sh --reasoning
+
 # explicit endpoint override
 URL=http://localhost:8011 bash scripts/quality-test.sh --quick
 
@@ -84,6 +97,12 @@ bash scripts/quality-test.sh --full --no-sandboxed
 
 # run ONLY the 3 sandbox packs
 bash scripts/quality-test.sh --sandboxed-only
+
+# run individual reasoning packs
+bash scripts/quality-test.sh --pack humaneval-plus-30 --enable-thinking --thinking-max-tokens 16384 --timeout-per-case 300
+bash scripts/quality-test.sh --pack lcb-v6-30 --enable-thinking --thinking-max-tokens 16384 --timeout-per-case 300
+bash scripts/quality-test.sh --pack gsm-symbolic-30
+bash scripts/quality-test.sh --pack gpqa-diamond
 ```
 
 Output:
@@ -145,20 +164,23 @@ benchlocal-cli run --full --endpoint http://localhost:8020 --model <name> --temp
 
 ### Reasoning-on evals
 
-Serving with `--reasoning on` is necessary but not sufficient: the request also has to send `chat_template_kwargs.enable_thinking=true`. The wrappers default to thinking off for canonical, reproducible runs. Enable it explicitly when measuring a reasoning fine-tune:
+Serving with a model's reasoning flag enabled is necessary but not sufficient: the request also has to send `chat_template_kwargs.enable_thinking=true`. `benchlocal-cli` honors each pack's `default_thinking` metadata, so the dedicated `--reasoning` suite defaults thinking on for all four packs while many format/extraction packs stay answer-only. Use `--enable-thinking` only when you want to force thinking on for every pack in a broader mode such as `--full`:
 
 ```bash
-# quality only
-bash scripts/quality-test.sh --full --enable-thinking --thinking-max-tokens 4096
+# dedicated reasoning suite; default thinking is on for these packs
+bash scripts/quality-test.sh --reasoning --thinking-max-tokens 16384
+
+# force thinking on for every full-suite pack
+bash scripts/quality-test.sh --full --enable-thinking --thinking-max-tokens 16384
 
 # full rebench: bench.sh + both quality-test.sh legs inherit it
-ENABLE_THINKING=1 THINKING_MAX_TOKENS=4096 SAMPLING_FROM_SERVER=1 bash scripts/rebench-full.sh
+ENABLE_THINKING=1 THINKING_MAX_TOKENS=16384 SAMPLING_FROM_SERVER=1 bash scripts/rebench-full.sh
 
 # TPS bench only
 ENABLE_THINKING=1 bash scripts/bench.sh
 ```
 
-If `/props` or the running container suggests reasoning is enabled but the wrapper is still sending `enable_thinking=false`, `quality-test.sh` / `bench.sh` print a warning rather than silently measuring the thinking-off path.
+If `/props` or the running container suggests reasoning is enabled but the wrapper is not forcing thinking on globally, `quality-test.sh` / `bench.sh` print a warning; pack defaults still apply, and `--enable-thinking` forces every pack on. `--thinking-max-tokens` now passes through independently and only affects packs whose thinking gate resolves on. The default is 16K; hard LiveCodeBench items may still exhaust that budget, so compare with `benchlocal-cli run --reasoning --no-thinking` when diagnosing budget runaway.
 
 **Why it matters:** a reasoning / exploratory fine-tune (e.g. Qwopus3.6, whose author recommends temp 0.75–1) is *under-represented* at temp 0 or with thinking disabled — greedy, thinking-off decoding collapses the path-exploration the fine-tune was trained for. But high temp and reasoning also *hurt* deterministic packs (DataExtract / StructOutput want exact, repeatable output), so read **per-pack deltas**, not just the total — and keep canonical temp-0 thinking-off as the bar for any apples-to-apples ranking.
 

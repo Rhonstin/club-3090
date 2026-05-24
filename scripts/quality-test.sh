@@ -85,9 +85,10 @@ OPTIONS (extra)
                    models are evaluated with request-level thinking enabled.
                    Also settable via ENABLE_THINKING=1 env.
   --thinking-max-tokens N
-                   Forward to benchlocal-cli --thinking-max-tokens N when
-                   --enable-thinking / ENABLE_THINKING=1 is active. Also
-                   settable via THINKING_MAX_TOKENS env.
+                   Forward to benchlocal-cli --thinking-max-tokens N. The
+                   budget applies only to packs whose thinking gate resolves on
+                   (pack default or --enable-thinking). Also settable via
+                   THINKING_MAX_TOKENS env.
 
 ENV VARS
   URL              Endpoint base URL (default: auto-detected via preflight,
@@ -101,14 +102,14 @@ ENV VARS
   ENABLE_THINKING Set to 1 to send request-level enable_thinking=true via
                    benchlocal-cli --enable-thinking. Default: 0.
   THINKING_MAX_TOKENS
-                   Optional thinking budget passed through to benchlocal-cli
-                   --thinking-max-tokens when thinking is enabled.
+                   Optional thinking budget passed through to benchlocal-cli.
+                   Applies only to packs whose thinking gate resolves on.
 
 EXAMPLES
   bash scripts/quality-test.sh                          # --medium against running compose
   bash scripts/quality-test.sh --quick                  # quicker, 2 packs only
   bash scripts/quality-test.sh --full                   # everything, needs Docker
-  bash scripts/quality-test.sh --reasoning              # HE+/LCB/GSM reasoning fast subsets
+  bash scripts/quality-test.sh --reasoning              # HE+/LCB/GSM/GPQA reasoning suite
   bash scripts/quality-test.sh --pack toolcall-15       # just the tool-call pack
   bash scripts/quality-test.sh --pack aider-polyglot-30 --timeout-per-case 3600
   URL=http://localhost:8030 bash scripts/quality-test.sh # against a different port
@@ -335,7 +336,7 @@ sys.exit(0 if walk(obj) else 1)
 }
 
 if [[ "$ENABLE_THINKING" != "1" ]] && server_reasoning_on; then
-  echo "[quality-test] WARN: server appears to have reasoning enabled, but requests will send enable_thinking=false. Use --enable-thinking or ENABLE_THINKING=1 for reasoning-on evals." >&2
+  echo "[quality-test] WARN: server appears to have reasoning enabled, but --enable-thinking is not forced. Pack defaults still apply; use --enable-thinking or ENABLE_THINKING=1 to force thinking on for every pack." >&2
 fi
 
 # ---- run benchlocal-cli ------------------------------------------------------
@@ -385,12 +386,10 @@ fi
 if [[ "$ENABLE_THINKING" == "1" ]]; then
   CLI_ARGS+=(--enable-thinking)
   echo "[quality-test] thinking: enabled (non-canonical)"
-  if [[ -n "$THINKING_MAX_TOKENS" ]]; then
-    CLI_ARGS+=(--thinking-max-tokens "$THINKING_MAX_TOKENS")
-    echo "[quality-test] thinking max tokens: $THINKING_MAX_TOKENS"
-  fi
-elif [[ -n "$THINKING_MAX_TOKENS" ]]; then
-  echo "[quality-test] NOTE: THINKING_MAX_TOKENS is set but thinking is off; ignoring it. Set ENABLE_THINKING=1 or --enable-thinking." >&2
+fi
+if [[ -n "$THINKING_MAX_TOKENS" ]]; then
+  CLI_ARGS+=(--thinking-max-tokens "$THINKING_MAX_TOKENS")
+  echo "[quality-test] thinking max tokens: $THINKING_MAX_TOKENS (applies to thinking-enabled packs)"
 fi
 
 # Run; capture exit code so we can also try to emit the compact one-liner

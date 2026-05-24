@@ -77,10 +77,23 @@ chmod +x "${tmp_bin}/benchlocal-cli"
 
 out="$(PATH="${tmp_bin}:$PATH" BENCHLOCAL_MOCK_LOG="$tmp_log" PREFLIGHT_NO_AUTODETECT=1 URL=http://mock MODEL=mock-model ENABLE_THINKING=1 THINKING_MAX_TOKENS=4096 bash scripts/quality-test.sh --quick 2>&1)"
 assert_contains "$out" "[quality-test] thinking: enabled"
-assert_contains "$out" "[quality-test] thinking max tokens: 4096"
+assert_contains "$out" "[quality-test] thinking max tokens: 4096 (applies to thinking-enabled packs)"
 args="$(cat "$tmp_log")"
 assert_contains "$args" "--enable-thinking"
 assert_contains "$args" "--thinking-max-tokens 4096"
+
+
+: > "$tmp_log"
+out="$(PATH="${tmp_bin}:$PATH" BENCHLOCAL_MOCK_LOG="$tmp_log" PREFLIGHT_NO_AUTODETECT=1 URL=http://mock MODEL=mock-model THINKING_MAX_TOKENS=8192 bash scripts/quality-test.sh --reasoning 2>&1)"
+assert_contains "$out" "[quality-test] thinking max tokens: 8192 (applies to thinking-enabled packs)"
+args="$(cat "$tmp_log")"
+assert_contains "$args" "--reasoning"
+assert_contains "$args" "--thinking-max-tokens 8192"
+if [[ "$args" == *"--enable-thinking"* ]]; then
+  echo "ASSERTION FAILED: quality-test forced --enable-thinking when only THINKING_MAX_TOKENS was set" >&2
+  echo "$args" >&2
+  exit 1
+fi
 
 : > "$tmp_log"
 out="$(PATH="${tmp_bin}:$PATH" BENCHLOCAL_MOCK_LOG="$tmp_log" PREFLIGHT_NO_AUTODETECT=1 URL=http://mock MODEL=mock-model bash scripts/quality-test.sh --quick 2>&1)"
