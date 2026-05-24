@@ -189,6 +189,7 @@ club-3090/
 │   ├── LOCAL_AI_PRIMER.md                 plain-English on-ramp: hardware / engines / sizes / quants
 │   ├── ARCHITECTURE.md                    how this stack thinks about LLM serving on 24 GB
 │   ├── HARDWARE.md                        Ampere SM 8.6+, NVLink note, 24 GB ceilings
+│   ├── WSL_SETUP.md                        Windows (WSL2) from-scratch setup walkthrough
 │   ├── GLOSSARY.md                        plain-language definitions (TPS / KV / MTP / TP / etc.)
 │   ├── UPSTREAM.md                        every upstream issue / PR we depend on or have filed
 │   ├── CLIFFS.md                          full synopsis of the prefill cliffs (root causes + fix landscape)
@@ -241,7 +242,7 @@ club-3090/
 | For any model on this stack | Notes |
 |---|---|
 | 1× or 2× NVIDIA RTX 3090 (24 GB each) | Larger Ampere/Ada cards (4090, A6000) work; smaller cards (12 GB) don't fit 27B-class models. |
-| Linux (Ubuntu 22.04+ tested) | macOS/Windows: vLLM is Linux + CUDA only. Llama.cpp works on macOS/Windows but recipes assume Linux paths. |
+| Linux (Ubuntu 22.04+ tested) | macOS/Windows: vLLM is Linux + CUDA only. Llama.cpp works on macOS/Windows but recipes assume Linux paths. **On Windows? See [docs/WSL_SETUP.md](docs/WSL_SETUP.md)** for the from-scratch WSL2 walkthrough. |
 | Docker + NVIDIA Container Toolkit | For vLLM. llama.cpp works without Docker. |
 | NVIDIA driver 580.x+ | For CUDA 13 runtime in vLLM nightly. |
 | ~30 GB free disk | Per model. More for multiple models. |
