@@ -45,7 +45,7 @@
 #     llamacpp/bounded-thinking Q4_K_M MTP + 200K + reasoning on + per-request GBNF grammar
 #     llamacpp/mtp-vision   Q4_K_M MTP + 150K @ 1M-px + q4_0 KV + mmproj (multimodal; 4M-px = override, lower ctx)
 #   Single-card ik_llama (IQ4_KS — ~0.5-0.8 GB leaner; best for VRAM-tight / WSL):
-#     ik-llama/iq4ks-mtp         IQ4_KS MTP + 262K + q4_0 KV (own image: ikawrakow/ik-llama-cpp)
+#     ik-llama/iq4ks-mtp         IQ4_KS MTP + 200K + q4_0 KV (own image: ikawrakow/ik-llama-cpp)
 #     ik-llama/iq4ks-mtp-vision  IQ4_KS MTP + 160K @ 1M-px + q4_0 KV + mmproj (multimodal; 4M-px = override, lower ctx)
 #
 # Env overrides (rarely needed):
