@@ -29,9 +29,9 @@
 #
 # Dependencies:
 #   - 2× RTX 3090 (Ampere SM 8.6), PCIe-only (no NVLink — works fine)
-#   - vLLM PR #40361 (Marlin pad-sub-tile-n) — patched files volume-mounted
-#     from /opt/ai/engines/vllm/primary/. PR is open upstream; drop the mount when it
-#     lands. See ../../patches/README.md for the git-clone command.
+#   - vLLM STABLE v0.21.0 image (pulled from Docker Hub) — no source overlays
+#     required (validated 2026-05-25: marlin-pad / PR-35936 / PR-41800 all
+#     unnecessary on a current vLLM; AutoRound INT4 TP=2 + MTP + vision boot clean).
 #
 # All dual-card variants in this dir:
 #
@@ -56,11 +56,12 @@
 # Tensor-parallel: 2
 services:
   vllm-qwen36-27b-dual:
-    # Tracking latest nightly intentionally — this stack uses fp8 KV (not
-    # TurboQuant), so it doesn't accumulate the same anchor-drift exposure
-    # the single-card project does. Pin if you hit a regression; otherwise
-    # ride the wave.
-    image: ${VLLM_IMAGE:-vllm/vllm-openai:nightly-${VLLM_NIGHTLY_SHA}}
+    # Pinned to a vLLM STABLE release (immutable — never purged from Docker Hub,
+    # unlike nightlies; this is the #407 pin-drift fix). Genesis-free + fp8 KV
+    # means no patch overlays are anchored here, so we ride stable releases.
+    # Bump the tag to a newer stable after a verify-stress + soak gate.
+    # Override with VLLM_IMAGE=... if you need a specific build.
+    image: ${VLLM_IMAGE:-vllm/vllm-openai:v0.21.0}
     container_name: "${ESTATE_CONTAINER:-vllm-qwen36-27b-dual}"
     restart: "no"
     ports:
@@ -72,24 +73,11 @@ services:
       # Closes club-3090 #22.
       - ../../cache/torch_compile:/root/.cache/vllm/torch_compile_cache
       - ../../cache/triton:/root/.triton/cache
-      # Marlin pad-sub-tile-n patch (vLLM PR #40361) — required for TP=2
-      # on AutoRound W4A16 models where out-dim shards fall below 64.
-      # Vendored in this repo at ../../patches/vllm-marlin-pad/ (no host
-      # filesystem dependency). Drops out when vllm#40361 lands upstream.
-      - ../../patches/vllm-marlin-pad/marlin.py:/usr/local/lib/python3.12/dist-packages/vllm/model_executor/kernels/linear/mixed_precision/marlin.py:ro
-      - ../../patches/vllm-marlin-pad/MPLinearKernel.py:/usr/local/lib/python3.12/dist-packages/vllm/model_executor/kernels/linear/mixed_precision/MPLinearKernel.py:ro
-      # vLLM PR #35936 required-tool fallback (drop when upstream lands).
-      # vLLM PR #35936 required-tool fallback — sidecar pattern (drop when upstream lands).
-      # Bind-mounted at side paths so install.sh can copy into vLLM's site-packages
-      # BEFORE Genesis runs — avoids the RO-mount conflict with Genesis P64/P68/P69
-      # which write to chat_completion/serving.py at vllm-import time. See
-      # patches/vllm-pr35936-required-fallback/install.sh + README.md.
-      - ../../patches/vllm-pr35936-required-fallback/vllm/entrypoints/openai/chat_completion/serving.py:/etc/club3090/pr35936-chat-completion-serving.py:ro
-      - ../../patches/vllm-pr35936-required-fallback/vllm/entrypoints/openai/engine/serving.py:/etc/club3090/pr35936-engine-serving.py:ro
-      - ../../patches/vllm-pr35936-required-fallback/install.sh:/etc/club3090/install-pr35936.sh:ro
-      # vLLM PR #41800 (truncate_prompt_tokens kwarg) overlay — fixes opencode
-      # HTTP 400 on get_max_tokens(). See patches/vllm-pr41800.../README.md.
-      - ../../patches/vllm-pr41800-truncate-prompt-tokens/install.sh:/etc/club3090/install-pr41800.sh:ro
+      # NOTE: vLLM source overlays (marlin-pad #40361, PR-35936 required-tool
+      # fallback, PR-41800 truncate_prompt_tokens) were dropped 2026-05-25 — all
+      # confirmed unnecessary on stable v0.21.0 (PR-41800 merged upstream; the
+      # other two don't trip on a current vLLM). Keeping zero source mounts is
+      # what makes this path pin-drift-immune. See docs/UPSTREAM.md.
       # froggeric/Qwen-Fixed-Chat-Templates qwen3.6 — fixes 7 default-template
       # bugs (empty <think></think> spam, </thinking> hallucination, unclosed
       # think before tool call, no-user-query crash, developer role, etc.).
@@ -129,9 +117,6 @@ services:
         # hardware where Cliff 2 GDN activation spikes occur at runtime
         # (~50-65K active context tokens). Costs ~20-30% TPS in exchange for
         # stability. See docs/HARDWARE.md "Note for WSL2 / Windows users".
-        # Install PR #35936 overlay before vllm imports (drop when upstream lands).
-        bash /etc/club3090/install-pr35936.sh
-        bash /etc/club3090/install-pr41800.sh
         # NVLink auto-detection (sets NCCL env vars, _NVLINK_ENABLED).
         source /etc/club3090/detect_nvlink.sh
         if [ "${_NVLINK_ENABLED:-0}" = "1" ]; then

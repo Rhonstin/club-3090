@@ -9,7 +9,7 @@ Source: https://huggingface.co/froggeric/Qwen-Fixed-Chat-Templates
 - Upstream timestamp: 2026-05-16T13:44:07Z
 - Upstream release label: v19
 - Local file SHA256: `4649b3fa3db3fda4d51173ed4ff0175fde7ece8bbceb9d595d04d862020c9746`
-- Status: re-eval pending maintainer rig A/B for issue #150; not adopted yet.
+- Status: **ADOPTED 2026-05-18 (#150)** — re-eval PASSED on `vllm/dual` (template-only A/B: hermesagent-20 +10pp 50→60%, 7 packs flat, TPS-neutral). See docs/UPSTREAM.md froggeric row (authoritative).
 
 ## Previous vendored snapshot
 
