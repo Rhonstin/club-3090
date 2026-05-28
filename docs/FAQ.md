@@ -185,6 +185,31 @@ bash scripts/rebench-full.sh \
 
 The chained scripts run in host-only mode (no `docker logs` / `docker inspect` scrapes) when `--url` is set, so the entire suite works against any OpenAI-API endpoint.
 
+### Which KV-cache quant should I use? (`q4_0` / `q5_0` / `turbo3` / `fp8`)
+
+KV-cache quant trades **quality ↔ context ceiling ↔ a little speed**, and the metric that matters is **tail precision** (99.9th-percentile KL divergence), not perplexity — the worst 0.1% of positions are exactly where quantization breaks JSON keys, closing braces, and tool-call grammar. [Anbeeld's KV-quant long-context benchmarks](https://anbeeld.com/articles/kv-cache-quantization-benchmarks-for-long-context) measured this on **Qwen3.6-27B / single RTX 3090 — the same model + GPU as this stack**:
+
+| K / V | % of bf16 KV | tail precision | use |
+|---|---:|---:|---|
+| `q8_0` / `q6_0` | 47% | 94.3% | best you'd actually run |
+| `q5_0` / `q5_0` | 34% | 93.2% | quality default (coding / agents / JSON) |
+| `q5_0` / `q4_1` | 33% | 92.7% | VRAM-constrained quality |
+| **`q4_0` / `q4_0`** | **28%** | **88.9%** | **shipped default — favors max context** |
+| `turbo3_tcq` | 20% | 81.6% | extreme context only — visible loss on structured output |
+| `turbo2` | 14% | 54.4% | last resort (no code / JSON / math) |
+
+Two takeaways: **(1) K is the sensitive cache** — keep K higher and starve V (`q5_0`/`q4_1` beats symmetric `q4_1` at the same size); **(2) turbo/TCQ only pays at 2–3 bit** — at 4+ bits scalar `q4_0`/`q5_0` wins, and turbo3 is *not* quality-neutral (the TurboQuant paper's "neutral at 3.5 bits" is a perplexity-average claim; the tail disagrees).
+
+**On this stack:** the llama.cpp / ik_llama composes default to `q4_0` (max context — the per-token loss is small *on average*, but meaningful on the tail for structured output). If you serve **coding / agent / tool-calling** traffic, bump quality with the `KV_TYPE` override (shell env wins over `.env`):
+
+```bash
+KV_TYPE=q5_0 bash scripts/switch.sh llamacpp/mtp     # ~93% tail vs q4_0's ~89%, at some context cost
+```
+
+On vLLM, `turboquant_3bit_nc` is the long-context default; where context allows, prefer `fp8_e5m2` (≈ q8-tier tail) via `KV_CACHE_DTYPE`.
+
+**Caveat:** a `verify-stress` 7/7 pass (incl. the 91K needle) does **not** certify KV-quant tail-safety — synthetic needle retrieval is blind to this drift (see [docs/CLIFFS.md](CLIFFS.md)). The gap also **grows at longer context**, so the choice matters more the bigger your prompts.
+
 ---
 
 ## Community
