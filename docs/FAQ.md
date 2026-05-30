@@ -272,7 +272,11 @@ bash scripts/switch.sh vllm/long-vision          # stateless: down the old, up t
 Downloading is a deliberate, separate step:
 
 - **Curated catalog model** → `bash scripts/setup.sh <model>` (grabs the right weights + patches, then verifies).
-- **Any other safetensors HF repo** → `bash scripts/pull.sh <org/Model> --profile-like <a-registry-key>`. It runs *our* KV math and **gates the download on whether the model fits your GPUs first** (add `--dry-run` to just evaluate, no download). That fit-check is precisely *why* it isn't auto-on-launch — the stack refuses to pull something it already knows won't run. Full guide: [docs/PULL.md](PULL.md).
+- **A safetensors HF repo our generator can handle** → `bash scripts/pull.sh <org/Model> --profile-like <a-registry-key>`. It evaluates *any* safetensors repo against our arch support + KV math (add `--dry-run` for evaluate-only, no download) and — **only if it clears every gate** (architecture supported → compose-emittable → fits your GPUs) — downloads and boots it. Anything that doesn't clear them stops with a precise reason, not a crash. Full guide: [docs/PULL.md](PULL.md).
+
+**Scope — this is not a "run any weights/quant" runner.** These scripts serve the stack's **supported models**: the curated catalog (`setup` / `switch` / `launch`), plus — via `pull` — **safetensors** repos whose **architecture our generator supports** (vLLM only). Outside that, they won't boot the model; they tell you honestly instead of half-running it:
+> - **GGUF / `.bin` repos** are not served by these scripts — use llama.cpp manually (see [The model I want isn't in the supported list](#the-model-i-want-isnt-in-the-supported-list--can-i-still-run-it)). `pull` aborts such repos at the deriver as `unsupported-format`.
+> - **Unsupported architectures / quants** (safetensors but outside the patch matrix) stop at a derive/eligibility gate with a structured reason — they are evaluated, never silently run.
 
 See also [How do I pick the right model + variant?](#how-do-i-pick-the-right-model--variant) for the first-install wizard, and [The model I want isn't in the supported list](#the-model-i-want-isnt-in-the-supported-list--can-i-still-run-it) for the pull-gate in depth.
 
