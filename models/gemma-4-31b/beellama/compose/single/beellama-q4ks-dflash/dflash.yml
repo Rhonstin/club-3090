@@ -14,12 +14,12 @@
 #              (big ctx) AND Gemma-4 spec-dec — ik-llama walls ~24K, mainline is ~10 TPS.
 #   Genesis:   N/A — beellama is a llama.cpp-family engine; Genesis is vLLM/Qwen3-Next-specific
 #   Status:    🧪 Experimental
-#   Caveats:   requires locally-built `beellama-cpp:local` image (unpublished upstream —
-#              build via `beellama.cpp/.devops/cuda.Dockerfile` + `FA_ALL_QUANTS`); not pullable yet.
-#              Build (Linux GCC+CUDA): cmake -B build -DGGML_CUDA=ON -DGGML_CUDA_FA=ON
-#              -DGGML_CUDA_FA_ALL_QUANTS=ON -DCMAKE_CUDA_ARCHITECTURES=86 -DCMAKE_BUILD_TYPE=Release
-#              && cmake --build build -j  (or bake the fork's .devops/cuda.Dockerfile with
-#              CUDA_DOCKER_ARCH=86 + the FA_ALL_QUANTS flag). See docs/INFERENCE_ENGINES.md.
+#   Caveats:   🧪 experimental pending cross-rig validation. Defaults to the community
+#              sm_86 image ghcr.io/noonghunna/beellama-cpp:sm86-b9459-07ac3ce — an
+#              unofficial club-3090 build of Anbeeld/beellama.cpp (MIT; upstream ships no
+#              official Linux/docker image). Other GPU arches: build from the fork's
+#              .devops/cuda.Dockerfile with -DGGML_CUDA_FA_ALL_QUANTS=ON + CUDA_DOCKER_ARCH=<arch>,
+#              then override BEELLAMA_IMAGE=. See docs/INFERENCE_ENGINES.md.
 #   Engine-profile: beellama-local
 #   Best for:  single-card Gemma-4-31B long-context + spec-dec serving — the one engine
 #              that gives both pillars in a single GGUF on one 3090 (54-193 TPS DFlash,
@@ -45,7 +45,8 @@
 # so `command:` below is just the server flags (same shape as ik-llama / llama-cpp composes).
 #
 # Quick start:
-#   1. Build the image (see Caveats above) → tags as beellama-cpp:local.
+#   1. Pull the image (sm_86/3090): docker pull ghcr.io/noonghunna/beellama-cpp:sm86-b9459-07ac3ce
+#      (other GPU arches: build the fork — see Caveats / docs/INFERENCE_ENGINES.md).
 #   2. Get the GGUFs (target + DFlash draft):
 #        hf download unsloth/gemma-4-31B-it-GGUF gemma-4-31B-it-Q4_K_S.gguf \
 #          --local-dir $MODEL_DIR/gemma-4-31b-gguf/unsloth-q4ks
@@ -73,7 +74,7 @@
 
 services:
   beellama-gemma4-31b-dflash:
-    image: ${BEELLAMA_IMAGE:-beellama-cpp:local}
+    image: ${BEELLAMA_IMAGE:-ghcr.io/noonghunna/beellama-cpp:sm86-b9459-07ac3ce}
     container_name: "${ESTATE_CONTAINER:-beellama-gemma4-31b}"
     restart: unless-stopped
     ports:

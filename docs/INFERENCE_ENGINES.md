@@ -257,7 +257,7 @@ Q1: Does the model fit your VRAM at desired quant?
 | **Qwen3.6-27B** (single-card no-cliffs path) | **llama.cpp** | Different memory model; no Cliff 2b under multi-turn |
 | **Qwen3.6-27B** (single-card with MTP, no PR-branch building) | **ik_llama.cpp** | MTP merged on main — get the ~+34% TPS lift without rebuilding from PR #22673 |
 | **Gemma 4 31B** (dual-card) | **vLLM** + MTP/DFlash overlays | Best spec-decode story, vision support |
-| **Gemma 4 31B** (single-card long-ctx + spec-dec) | **beellama.cpp** (experimental, locally-built image) | Only single-card engine with Gemma-4 windowed KV *and* DFlash spec-dec in one GGUF |
+| **Gemma 4 31B** (single-card long-ctx + spec-dec) | **beellama.cpp** (experimental, unofficial sm_86 image) | Only single-card engine with Gemma-4 windowed KV *and* DFlash spec-dec in one GGUF |
 | **Carnice / Qwopus / variants** | **vLLM** | Same daily-driver path |
 | **(future) MiniMax-M2.7-REAP-172B** | **ktransformers** + SGLang | Big-MoE > VRAM, router-aware caching is the unlock |
 | **(future) GPT-OSS-120B** | **ktransformers** or **llama.cpp** `--n-cpu-moe` | Either works; ktransformers ~+20% TPS but harder to deploy |
@@ -307,7 +307,13 @@ Q1: Does the model fit your VRAM at desired quant?
 
 Honest gaps:
 
-- **No published / pullable Docker image** — upstream ships Windows binaries + source only. The shipped beellama composes (`beellama/dflash`, `beellama/gemma-dflash`) are 🧪 **Experimental** and reference a **locally-built** image `beellama-cpp:local`; the model-default resolver skips them until an image is published. **Other users must build the image themselves.** From a clone of the fork (Linux GCC + CUDA):
+- **No *official* Docker image (upstream ships Windows binaries + source only); we publish an unofficial sm_86 build.** The shipped beellama composes (`beellama/dflash`, `beellama/gemma-dflash`) are 🧪 **Experimental** and default to **`ghcr.io/noonghunna/beellama-cpp:sm86-b9459-07ac3ce`** — an unofficial club-3090 build of `Anbeeld/beellama.cpp` (MIT), **sm_86 / RTX 3090 only**. So 3090 users can **pull and run**:
+
+  ```bash
+  docker pull ghcr.io/noonghunna/beellama-cpp:sm86-b9459-07ac3ce
+  ```
+
+  The model-default resolver still skips them (`(NA)` experimental status) until they're cross-rig validated — `ik-llama` stays the single-card default. **Other GPU arches must build the image themselves** (the published one is sm_86-only). From a clone of the fork (Linux GCC + CUDA):
 
   ```bash
   cmake -B build -DGGML_CUDA=ON -DGGML_NATIVE=ON \
@@ -316,7 +322,7 @@ Honest gaps:
   cmake --build build -j
   ```
 
-  Use `-DCMAKE_CUDA_ARCHITECTURES=89` for an RTX 4090, `120` for a 5090, etc. To produce the `beellama-cpp:local` Docker image the composes expect, bake the fork's `.devops/cuda.Dockerfile` with `CUDA_DOCKER_ARCH=86` (or your arch) and the `-DGGML_CUDA_FA_ALL_QUANTS=ON` flag added — the stock Dockerfile omits it, and **`FA_ALL_QUANTS` is required for the TurboQuant / TCQ cache types** (and for the `q5_0`/`q4_1` KV the composes default to). Override the image tag per-launch with `BEELLAMA_IMAGE=...`.
+  Use `-DCMAKE_CUDA_ARCHITECTURES=89` for an RTX 4090, `120` for a 5090, etc. To produce a Docker image for your arch, bake the fork's `.devops/cuda.Dockerfile` with `CUDA_DOCKER_ARCH=<arch>` and the `-DGGML_CUDA_FA_ALL_QUANTS=ON` flag added — the stock Dockerfile omits it, and **`FA_ALL_QUANTS` is required for the TurboQuant / TCQ cache types** (and for the `q5_0`/`q4_1` KV the composes default to). Point the composes at it per-launch with `BEELLAMA_IMAGE=...`.
 - **Server target ENTRYPOINT is `/app/llama-server`** — compose `command:` is server flags only (same shape as the ik-llama / llama-cpp composes).
 - **Single-stream / `-np 1`** — DFlash is single-slot by default; same compute-bound single-card caveat as the other llama.cpp-family composes.
 

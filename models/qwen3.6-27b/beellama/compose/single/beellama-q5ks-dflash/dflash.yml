@@ -12,12 +12,12 @@
 #              pressure-free single 3090 — see beellama.cpp/docs/quickstart-qwen36-dflash.md)
 #   Genesis:   N/A — beellama is a llama.cpp-family engine; Genesis is vLLM/Qwen3-Next-specific
 #   Status:    🧪 Experimental
-#   Caveats:   requires locally-built `beellama-cpp:local` image (unpublished upstream —
-#              build via `beellama.cpp/.devops/cuda.Dockerfile` + `FA_ALL_QUANTS`); not pullable yet.
-#              Build (Linux GCC+CUDA): cmake -B build -DGGML_CUDA=ON -DGGML_CUDA_FA=ON
-#              -DGGML_CUDA_FA_ALL_QUANTS=ON -DCMAKE_CUDA_ARCHITECTURES=86 -DCMAKE_BUILD_TYPE=Release
-#              && cmake --build build -j  (or bake the fork's .devops/cuda.Dockerfile with
-#              CUDA_DOCKER_ARCH=86 + the FA_ALL_QUANTS flag). See docs/INFERENCE_ENGINES.md.
+#   Caveats:   🧪 experimental pending cross-rig validation. Defaults to the community
+#              sm_86 image ghcr.io/noonghunna/beellama-cpp:sm86-b9459-07ac3ce — an
+#              unofficial club-3090 build of Anbeeld/beellama.cpp (MIT; upstream ships no
+#              official Linux/docker image). Other GPU arches: build from the fork's
+#              .devops/cuda.Dockerfile with -DGGML_CUDA_FA_ALL_QUANTS=ON + CUDA_DOCKER_ARCH=<arch>,
+#              then override BEELLAMA_IMAGE=. See docs/INFERENCE_ENGINES.md.
 #   Engine-profile: beellama-local
 #   Best for:  single-card coding / agentic serving where you want DFlash spec-dec
 #              that is tool-grammar-neutral (does NOT amplify the CodeAct attractor the
@@ -47,7 +47,8 @@
 # so `command:` below is just the server flags (same shape as ik-llama / llama-cpp composes).
 #
 # Quick start:
-#   1. Build the image (see Caveats above) → tags as beellama-cpp:local.
+#   1. Pull the image (sm_86/3090): docker pull ghcr.io/noonghunna/beellama-cpp:sm86-b9459-07ac3ce
+#      (other GPU arches: build the fork — see Caveats / docs/INFERENCE_ENGINES.md).
 #   2. Get the GGUFs (target + DFlash draft):
 #        hf download unsloth/Qwen3.6-27B-GGUF Qwen3.6-27B-Q5_K_S.gguf \
 #          --local-dir $MODEL_DIR/qwen3.6-27b-gguf/unsloth-q5ks
@@ -75,7 +76,7 @@
 
 services:
   beellama-qwen36-27b-dflash:
-    image: ${BEELLAMA_IMAGE:-beellama-cpp:local}
+    image: ${BEELLAMA_IMAGE:-ghcr.io/noonghunna/beellama-cpp:sm86-b9459-07ac3ce}
     container_name: "${ESTATE_CONTAINER:-beellama-qwen36-27b}"
     restart: unless-stopped
     ports:
