@@ -7,11 +7,22 @@
 # Stateless — re-run any time you want a different config.
 #
 # Usage:
-#   bash scripts/switch.sh <variant>           # switch + tail until ready
-#   bash scripts/switch.sh <variant> --no-wait # switch and return immediately
-#   bash scripts/switch.sh --force <variant>   # skip hardware/free-VRAM preflight
-#   bash scripts/switch.sh --list              # show all variants
-#   bash scripts/switch.sh --down              # just bring down whatever's up
+#   bash scripts/switch.sh <variant>            # switch + tail until ready
+#   bash scripts/switch.sh <variant> --no-wait  # switch and return immediately
+#   bash scripts/switch.sh --force <variant>    # skip hardware/free-VRAM preflight
+#   bash scripts/switch.sh --list               # show all variants + the defaults view
+#   bash scripts/switch.sh --defaults           # just the per-model defaults view
+#   bash scripts/switch.sh --down               # just bring down whatever's up
+#   bash scripts/switch.sh --set-default <slug>  # pin <slug> as YOUR default for its model (.env)
+#   bash scripts/switch.sh --clear-default <model>  # remove your pinned default for <model>
+#
+# `<…>/default` tokens auto-resolve to a concrete slug (design §13.1):
+#   <engine>/default        e.g. vllm/default — the maintainer's recommended
+#                           config for that engine on the detected topology.
+#   <engine>/<topo>/default e.g. vllm/dual/default — force the topology.
+#   <model>/default         e.g. qwen3.6-27b/default — YOUR preferred config:
+#                           your `.env` pin if set, else the curated pick
+#                           (ENGINE_PREFERENCE walk) for the detected topology.
 #
 # Variant names are derived from the compose registry (the single source of
 # truth); `bash scripts/switch.sh --list` is authoritative. A representative
@@ -135,26 +146,121 @@ switch_topology_from_gpus() {
 }
 
 resolve_default_variant() {
+  # Resolves a `<…>/default` token to a concrete slug. Three forms (design
+  # §13.1):
+  #   <engine>/<topology>/default  → engine-recommendation, explicit topology
+  #   <X>/default                  → dispatch on X: engine name → engine
+  #                                   recommendation; model-id → the user's
+  #                                   model default (.env pin ‖ curated walk)
+  #   anything else                → passthrough (already a concrete slug)
   local variant="$1" engine topology target
   if [[ "$variant" =~ ^([^/]+)/(single|dual|multi[0-9]+)/default$ ]]; then
     engine="${BASH_REMATCH[1]}"
     topology="${BASH_REMATCH[2]}"
+    if ! target="$(registry_default_target "$ROOT_DIR" "$PRIMARY_MODEL" "$engine" "$topology")"; then
+      echo "ERROR: cannot resolve default variant '${variant}' for primary model ${PRIMARY_MODEL}." >&2
+      exit 1
+    fi
+    printf '%s' "$target"
+    return 0
   elif [[ "$variant" =~ ^([^/]+)/default$ ]]; then
-    engine="${BASH_REMATCH[1]}"
     topology="$(switch_topology_from_gpus)"
-  else
-    printf '%s' "$variant"
+    if ! target="$(x_default_dispatch "$ROOT_DIR" "$variant" "$topology" "$PRIMARY_MODEL")"; then
+      echo "ERROR: cannot resolve default variant '${variant}'." >&2
+      exit 1
+    fi
+    printf '%s' "$target"
     return 0
   fi
-  if ! target="$(registry_default_target "$ROOT_DIR" "$PRIMARY_MODEL" "$engine" "$topology")"; then
-    echo "ERROR: cannot resolve default variant '${variant}' for primary model ${PRIMARY_MODEL}." >&2
-    exit 1
-  fi
-  printf '%s' "$target"
+  printf '%s' "$variant"
 }
 
 usage() {
   sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'
+  exit 0
+}
+
+# --- PR-B: user-pinnable model defaults (.env) -------------------------------
+ENV_FILE="${ROOT_DIR}/.env"
+
+# Derive (model, pin-key) from a slug, or fail with a message. Echoes
+# "<model>\t<pin-key>".
+slug_model_and_pinkey() {
+  local slug="$1" out
+  if ! out="$(python3 - "$ROOT_DIR" "$slug" <<'PY_SLUGINFO'
+import sys
+from pathlib import Path
+root = Path(sys.argv[1]); sys.path.insert(0, str(root))
+from scripts.lib.profiles.compose_registry import model_of_slug, model_default_pin_key  # noqa: E402
+slug = sys.argv[2]
+model = model_of_slug(slug)
+if not model:
+    print(f"unknown slug {slug!r} — run: scripts/switch.sh --list", file=sys.stderr)
+    raise SystemExit(1)
+print(f"{model}\t{model_default_pin_key(model)}")
+PY_SLUGINFO
+)"; then
+    return 1
+  fi
+  printf '%s' "$out"
+}
+
+# Write KEY=VALUE into .env, replacing any existing line for KEY (round-trips
+# with --clear-default). Preserves all other lines + ordering.
+env_set_key() {
+  local key="$1" value="$2" tmp
+  tmp="$(mktemp)"
+  if [[ -f "$ENV_FILE" ]]; then
+    # Drop any existing assignment for KEY (with or without `export`).
+    grep -vE "^[[:space:]]*(export[[:space:]]+)?${key}=" "$ENV_FILE" > "$tmp" || true
+  fi
+  printf '%s=%s\n' "$key" "$value" >> "$tmp"
+  mv "$tmp" "$ENV_FILE"
+}
+
+# Remove any assignment for KEY from .env (no-op if .env or the key is absent).
+env_clear_key() {
+  local key="$1" tmp
+  [[ -f "$ENV_FILE" ]] || return 0
+  tmp="$(mktemp)"
+  grep -vE "^[[:space:]]*(export[[:space:]]+)?${key}=" "$ENV_FILE" > "$tmp" || true
+  mv "$tmp" "$ENV_FILE"
+}
+
+set_default() {
+  local slug="$1" info model key
+  if [[ -z "${VARIANTS[$slug]:-}" ]]; then
+    echo "[switch] ERROR: '${slug}' is not a known variant — can't pin it." >&2
+    echo "[switch]        Run: bash scripts/switch.sh --list" >&2
+    exit 1
+  fi
+  if ! info="$(slug_model_and_pinkey "$slug")"; then
+    exit 1
+  fi
+  IFS=$'\t' read -r model key <<< "$info"
+  env_set_key "$key" "$slug"
+  echo "[switch] pinned '${slug}' as your default for ${model} (${key} in .env)."
+  echo "[switch] bare 'launch.sh' / '${model%%/*}…' resolves there now; clear it with:"
+  echo "[switch]   bash scripts/switch.sh --clear-default ${model}"
+  exit 0
+}
+
+clear_default() {
+  local model="$1" key
+  key="$(python3 - "$ROOT_DIR" "$model" <<'PY_CLEARKEY'
+import sys
+from pathlib import Path
+root = Path(sys.argv[1]); sys.path.insert(0, str(root))
+from scripts.lib.profiles.compose_registry import model_default_pin_key  # noqa: E402
+print(model_default_pin_key(sys.argv[2]))
+PY_CLEARKEY
+)"
+  if [[ -f "$ENV_FILE" ]] && grep -qE "^[[:space:]]*(export[[:space:]]+)?${key}=" "$ENV_FILE"; then
+    env_clear_key "$key"
+    echo "[switch] cleared your pinned default for ${model} (removed ${key} from .env)."
+  else
+    echo "[switch] no pinned default set for ${model} (${key} not in .env) — nothing to clear."
+  fi
   exit 0
 }
 
@@ -220,8 +326,49 @@ list_variants() {
     }
   '
   echo
+  show_defaults_view
+  echo
   echo "Switch to one:  bash scripts/switch.sh <variant>"
   echo "Or via wizard:  bash scripts/launch.sh   (or: launch.sh --variant <variant>)"
+  exit 0
+}
+
+# Discoverability (design §7): per model, what `<model>/default` resolves to on
+# the DETECTED topology, marked user-pin vs curated, with a hint to pin. Shared
+# between `--list` (appended) and `--defaults` (standalone). Reads the .env pin
+# straight from the loaded environment (callers load .env above).
+show_defaults_view() {
+  local topology
+  topology="$(switch_topology_from_gpus)"
+  echo "Defaults — what \`<model>/default\` resolves to on this rig (${topology}):"
+  echo "  (pin = your .env pin · curated = ENGINE_PREFERENCE walk · — = none for this topology)"
+  local models model pin_key pin_value resolved source note
+  models="$(python3 -c "import sys; sys.path.insert(0,'$ROOT_DIR'); from scripts.lib.profiles.compose_registry import model_set; print('\n'.join(sorted(model_set())))")"
+  while IFS= read -r model; do
+    [[ -n "$model" ]] || continue
+    pin_key="$(python3 -c "import sys; sys.path.insert(0,'$ROOT_DIR'); from scripts.lib.profiles.compose_registry import model_default_pin_key; print(model_default_pin_key('$model'))")"
+    pin_value="${!pin_key:-}"
+    note=""
+    if resolved="$(model_default_target "$ROOT_DIR" "$model" "$topology" 2>/dev/null)"; then
+      if [[ -n "$pin_value" && "$resolved" == "$pin_value" ]]; then
+        source="pin"
+      elif [[ -n "$pin_value" ]]; then
+        source="curated"
+        note="  (your pin ${pin_value} was ignored — invalid/mismatched; see warnings)"
+      else
+        source="curated"
+      fi
+      printf '  %-18s %-32s [%s]%s\n' "$model" "$resolved" "$source" "$note"
+    else
+      printf '  %-18s %-32s [%s]\n' "$model" "—" "pick explicitly"
+    fi
+  done <<< "$models"
+  echo "  Pin your own:    bash scripts/switch.sh --set-default <slug>"
+  echo "  Clear a pin:     bash scripts/switch.sh --clear-default <model>"
+}
+
+defaults_view_standalone() {
+  show_defaults_view
   exit 0
 }
 
@@ -483,6 +630,15 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help) usage ;;
     --list) list_variants ;;
+    --defaults) defaults_view_standalone ;;
+    --set-default)
+      [[ -n "${2:-}" ]] || { echo "ERROR: --set-default needs a <slug> (e.g. vllm/dual)." >&2; exit 1; }
+      set_default "$2"
+      ;;
+    --clear-default)
+      [[ -n "${2:-}" ]] || { echo "ERROR: --clear-default needs a <model> (e.g. qwen3.6-27b)." >&2; exit 1; }
+      clear_default "$2"
+      ;;
     --down) down_running; exit 0 ;;
     --no-wait) WAIT=0 ;;
     --force) FORCE=1 ;;

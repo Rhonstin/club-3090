@@ -583,3 +583,164 @@ DEFAULTS = {
     ("qwen3.6-35b-a3b", "vllm", "single"): "vllm/qwen-a3b-preview-single",
     ("qwen3.6-35b-a3b", "vllm", "dual"): "vllm/qwen-35b-a3b-dual",
 }
+
+
+# --- PR-B: model-default resolver knobs (maintainer-owned, design §13.3) ----
+#
+# Two curated tables drive the `<model>/default` resolver. They are maintainer
+# knobs — edited by PR, never auto-grown. See docs/model-default-resolver
+# design + the repo CLAUDE.md "Default rule" note.
+
+# A SHORT opt-in shortlist of models eligible to be the *bare-launch* default
+# (`launch.sh` with no model + no pin → first INSTALLED model on this list →
+# its `<model>/default`). This is NOT an exhaustive ranking of the catalog:
+#   - Models absent from it are fully runnable by name (`--model X` /
+#     `X/default`); they are simply never the auto-default.
+#   - New models are NOT auto-added. Adding a model touches nothing here;
+#     promote one explicitly only when desired.
+#   - Order within the (short) list = the tiebreak for "first installed".
+RECOMMENDED_DEFAULT_MODELS = ["qwen3.6-27b", "gemma-4-31b"]
+
+# Which engine wins, per detected topology, when resolving `<model>/default`
+# with no user pin. The resolver walks this list in order and picks the FIRST
+# engine that has a functional DEFAULTS[(model, engine, topology)] entry (i.e.
+# whose status is NOT in the (NA) set). This is the whole recommendation
+# policy expressed as data — reorder a row to change a recommendation, no code
+# change, any topology.
+#
+# Engine identifiers are the slug-prefix form used in DEFAULTS keys:
+#   vllm · ik-llama · llamacpp   (+ beellama, aspirational — see below).
+# `beellama` is ranked but has ZERO registry entries today (blocked on an
+# upstream Docker image — see docs/UPSTREAM.md). The resolver skips it
+# naturally (no DEFAULTS hit) → no behavior change until it is onboarded, at
+# which point it AUTO-PROMOTES to the single-GPU default with no resolver edit.
+ENGINE_PREFERENCE = {
+    "single": ["beellama", "ik-llama", "llamacpp", "vllm"],
+    "dual": ["vllm", "ik-llama", "llamacpp", "beellama"],
+    "multi": ["vllm", "ik-llama", "llamacpp", "beellama"],
+}
+
+
+def _topology_family(topology):
+    """Map a concrete topology to its ENGINE_PREFERENCE family.
+
+    Concrete topologies are `single` · `dual` · `multi4` · `multiN`; the
+    preference table keys on the family `single` · `dual` · `multi`.
+    """
+    if topology == "single":
+        return "single"
+    if topology == "dual":
+        return "dual"
+    if topology.startswith("multi"):
+        return "multi"
+    return topology
+
+
+def _nearest_lower_topology(topology):
+    """Degradation order (design §6): notice + nearest-lower topology.
+
+    multiN → dual → single → None. Returns the next topology to try, or None
+    when there is nowhere lower to fall.
+    """
+    if topology.startswith("multi"):
+        return "dual"
+    if topology == "dual":
+        return "single"
+    return None
+
+
+def engine_set():
+    """The closed set of engine namespace-prefixes (DEFAULTS keys + ranked).
+
+    `X/default` dispatch (design §13.1): `X ∈ engine_set` → engine
+    recommendation; else `X ∈ model_set` → model default; else error.
+    Engines and model-ids are disjoint by construction.
+    """
+    engines = set()
+    for _model, engine, _topology in DEFAULTS:
+        engines.add(engine)
+    for ranked in ENGINE_PREFERENCE.values():
+        engines.update(ranked)
+    return engines
+
+
+def model_set():
+    """The set of model-ids that appear in DEFAULTS (the runnable catalog)."""
+    return {model for (model, _engine, _topology) in DEFAULTS}
+
+
+def _functional_default(model, engine, topology):
+    """A DEFAULTS slug for (model, engine, topology) whose status is functional.
+
+    Returns the slug only when an entry exists AND its registry status is NOT
+    in the (NA) set (experimental/preview/upstream-gated/deprecated) — a
+    broken/preview config must never become someone's auto-default (§12.5).
+    Returns None otherwise.
+    """
+    slug = DEFAULTS.get((model, engine, topology))
+    if not slug:
+        return None
+    entry = COMPOSE_REGISTRY.get(slug)
+    if entry is None:
+        return None
+    if entry.get("status", "production") not in FUNCTIONAL_STATUSES:
+        return None
+    return slug
+
+
+def curated_default_target(model, topology):
+    """Curated fallback (§4): walk ENGINE_PREFERENCE[family], first functional
+    DEFAULTS slug wins. Returns the slug, or None if no functional curated
+    default exists for (model, topology).
+    """
+    family = _topology_family(topology)
+    for engine in ENGINE_PREFERENCE.get(family, []):
+        slug = _functional_default(model, engine, topology)
+        if slug:
+            return slug
+    return None
+
+
+def community_default_target(model, topology, hw_class=None):  # noqa: ARG001
+    """Community-ranked best config — the FUTURE middle precedence rung (§13.4).
+
+    Contract: returns a ranked slug when the submissions/ranking app exists;
+    returns None today (always skipped). The resolver inserts a non-None result
+    BETWEEN the user pin and the curated fallback. v1 ships this stub returning
+    None so the ladder rung is real, not aspirational; a test asserts it is
+    skipped.
+    """
+    return None
+
+
+def model_default_pin_key(model):
+    """The .env key for a per-model user pin (design §13.2).
+
+    `CLUB3090_DEFAULT_<MODELID uppercased, non-alnum→_>`, e.g.
+    qwen3.6-27b → CLUB3090_DEFAULT_QWEN3_6_27B.
+    """
+    suffix = "".join(c if c.isalnum() else "_" for c in model).upper()
+    return f"CLUB3090_DEFAULT_{suffix}"
+
+
+def model_of_slug(slug):
+    """The model-id a slug belongs to, or None if the slug is unknown."""
+    entry = COMPOSE_REGISTRY.get(slug)
+    return entry.get("model") if entry else None
+
+
+def slug_topology(slug):
+    """The topology family a slug serves, derived from its compose_path.
+
+    compose_path is `models/<model>/<engine>/compose/<topology>/<quant>/...`.
+    Returns `single`/`dual`/`multi` (the ENGINE_PREFERENCE family) or None.
+    """
+    entry = COMPOSE_REGISTRY.get(slug)
+    if not entry:
+        return None
+    cp = entry.get("compose_path", "")
+    if "/compose/" not in cp:
+        return None
+    after = cp.split("/compose/", 1)[1]
+    topo = after.split("/", 1)[0]
+    return _topology_family(topo)
