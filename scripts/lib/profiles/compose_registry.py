@@ -477,14 +477,6 @@ COMPOSE_REGISTRY = {
         default_port=8051,
         kvcalc_key="qwen3.6-35b-a3b:qwen-35b-a3b-dual",
     ),
-    "vllm/qwen-a3b-preview-mtp": _entry(
-        model="qwen3.6-35b-a3b", weights_variant="autoround-int4", workload="fast-chat",
-        engine="vllm-nightly-clean", drafter="qwen-mtp-builtin", kv_format="fp8_e5m2",
-        tp=2, max_ctx=16384, max_num_seqs=1, mem_util=0.92,
-        compose_path="models/qwen3.6-35b-a3b/vllm/compose/dual/autoround-int4/fp8-mtp.yml",
-        default_port=8052,
-        kvcalc_key="qwen3.6-35b-a3b:qwen-a3b-preview-mtp",
-    ),
 }
 
 
