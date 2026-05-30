@@ -61,6 +61,8 @@ Pin engine images only when we vendor patches into the running container. Otherw
 
 When adding the first vendored patch to a previously-rolling engine: pin in the same commit. When dropping the last patch: unpin in the same commit. Bump pins via PR with a `verify-full.sh` + `bench.sh` re-run, never silently.
 
+**Delivery model (vLLM):** patches reach the container by **volume-mounting into the pinned *stock* `vllm/vllm-openai` image** (python sidecars / site-package overlays / install scripts — see `delivery_mechanism` in `scripts/lib/profiles/patches.yml`), **not** by baking a custom image. The older baked-image path (`ghcr.io/noonghunna/vllm-club3090`, which shipped the release images through `club-v0.8.3`) is **retired** — no compose or engine-pin references it, and the `dockerfile_bake` `delivery:` block in `patches.yml` is legacy/test-only. The GHCR package is kept as historical release artifacts (users pinned to a `club-v0.8.x` tag can still pull); it is not deleted and not produced by anything in-repo.
+
 ### CHANGELOG
 - `CHANGELOG.md` (cross-cutting) and `models/<name>/CHANGELOG.md` (per-model) are **append-only history**. Don't rewrite past entries even when a finding is superseded — add a new entry. The historical trail is load-bearing for "why did we do X."
 - Old entries can reference files / patches that no longer exist. That's fine — leave them.
