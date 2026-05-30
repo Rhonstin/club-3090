@@ -2,6 +2,19 @@
 
 Dated history for Qwen3.6-27B configs in this repo. Combines the single-card and dual-card timelines (both were previously separate repos; consolidated here 2026-04-28).
 
+## 2026-05-30 — beellama.cpp as a first-class compose engine (DFlash, single-card)
+
+Onboards [beellama.cpp](https://github.com/Anbeeld/beellama.cpp) (Anbeeld's llama.cpp fork — DFlash cross-attention spec-dec + SWA windowed KV) as a registry engine, with one single-card DFlash compose per model:
+
+- **Qwen3.6-27B** → `beellama/dflash` (port 8060): Unsloth `Q5_K_S` target + Anbeeld `DFlash-IQ4_XS` draft (`--spec-type dflash`), `q5_0`(K)/`q4_1`(V) KV, 102K ctx, `-np 1`. Anbeeld's "Precision combo". DFlash is **tool-grammar-neutral** here — the external drafter does not amplify the CodeAct attractor the built-in MTP head does ([#237](https://github.com/noonghunna/club-3090/discussions/237)).
+- **Gemma-4-31B** → `beellama/gemma-dflash` (port 8061): Unsloth `Q4_K_S` target + Anbeeld `DFlash-IQ4_XS` draft, same `q5_0`/`q4_1` KV + 102K ctx. The only single-card engine that does Gemma-4 **windowed KV** (big ctx) *and* spec-dec in one GGUF (ik-llama walls ~24K; mainline ~10 TPS).
+
+**Status: 🧪 Experimental** — both reference a **locally-built** image `${BEELLAMA_IMAGE:-beellama-cpp:local}` (upstream ships no pullable image; build via the fork's `.devops/cuda.Dockerfile` with `CUDA_DOCKER_ARCH=86` + `-DGGML_CUDA_FA_ALL_QUANTS=ON`). Surfaced as `(NA: experimental)` in `--list`; launch is `--force`-gated.
+
+**Catalog wiring:** new engine profile `engines/beellama-local.yml`; two DFlash GGUF drafters (`anbeeld-qwen-dflash`, `anbeeld-gemma-dflash`); `compose_registry.py` entries (`kvcalc_key="SKIP"` — llama.cpp-family); weights-map + hardware (`q4_1`) updates; INFERENCE_ENGINES + UPSTREAM notes.
+
+**Default-resolver invariant preserved:** beellama is `#1` in `ENGINE_PREFERENCE[single]`, but its `(NA)` status + the absence of a `DEFAULTS` row means the resolver skips it → `qwen3.6-27b single` still resolves to `ik-llama/iq4ks-mtp` (asserted by `test-model-default-resolver.sh`). Auto-promotes to the single default only when a published image lands and the composes flip to production. Full suite green (only the pre-existing `test-submit-bench.sh` fixture failure remains).
+
 ## 2026-05-30 — Model-default resolver + user-pinnable defaults (`<model>/default`, `--set-default`)
 
 Adds a two-layer default scheme on top of the existing `<engine>/default` map. `<engine>/default` stays the maintainer's recommendation (read-only to users); the new `<model>/default` is the *user's* preference — their `.env` pin if set, else a curated pick for the detected topology.

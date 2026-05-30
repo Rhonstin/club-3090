@@ -26,8 +26,8 @@ p = load_profiles()
 assert len(p.hardware) == 9
 assert len(p.models) == 4
 assert len(p.workloads) == 5
-assert len(p.engines) == 8
-assert len(p.drafters) == 6
+assert len(p.engines) == 9
+assert len(p.drafters) == 8
 assert len(p.calibration) == 4
 PY
 

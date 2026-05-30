@@ -380,6 +380,22 @@ COMPOSE_REGISTRY = {
         kvcalc_key="SKIP",
     ),
 
+    # Qwen3.6-27B beellama.cpp DFlash — single-card, Q5_K_S target + Anbeeld
+    # DFlash-IQ4_XS draft, q5_0(K)/q4_1(V) KV. beellama is a llama.cpp-family
+    # engine (kvcalc SKIP, like ik-llama). Experimental: requires the locally
+    # built `beellama-cpp:local` image (unpublished upstream — see Caveats in the
+    # compose + engine profile). kv_format reflects K-side precision (V is q4_1).
+    "beellama/dflash": _entry(
+        model="qwen3.6-27b", weights_variant="beellama-q5ks-dflash", workload="fast-chat",
+        engine="beellama-local", drafter="anbeeld-qwen-dflash", kv_format="q5_0",
+        tp=1, max_ctx=102400, max_num_seqs=1, mem_util=None,
+        compose_path="models/qwen3.6-27b/beellama/compose/single/beellama-q5ks-dflash/dflash.yml",
+        default_port=8060,
+        kvcalc_key="SKIP",
+        status="experimental",
+        status_note="Requires locally-built beellama-cpp:local image (unpublished upstream — build via beellama.cpp .devops/cuda.Dockerfile + FA_ALL_QUANTS).",
+    ),
+
     # Qwen3.6-27B PRISM-PRO-DQ (Ex0bit dynamic-quant GGUF) — community-experimental, ik-llama.
     "ik-llama/prism-pro-dq-mtp": _entry(
         model="qwen3.6-27b", weights_variant="ex0bit-prism-pro-dq", workload="fast-chat",
@@ -501,6 +517,22 @@ COMPOSE_REGISTRY = {
         compose_path="models/gemma-4-31b/vllm/compose/dual/autoround-int4/int8.yml",
         default_port=8032, required_engine_features=["int8_per_token_head"],
         kvcalc_key="gemma-4-31b:gemma-dual-int8",
+    ),
+
+    # Gemma-4-31B beellama.cpp DFlash — single-card, Q4_K_S target + Anbeeld
+    # DFlash-IQ4_XS draft, q5_0(K)/q4_1(V) KV. The ONLY single-card engine that
+    # does Gemma-4 SWA windowed KV (big ctx) AND Gemma-4 spec-dec (ik-llama walls
+    # ~24K; mainline llama.cpp ~10 TPS). llama.cpp-family → kvcalc SKIP.
+    # Experimental: requires the locally built `beellama-cpp:local` image.
+    "beellama/gemma-dflash": _entry(
+        model="gemma-4-31b", weights_variant="beellama-q4ks-dflash", workload="fast-chat",
+        engine="beellama-local", drafter="anbeeld-gemma-dflash", kv_format="q5_0",
+        tp=1, max_ctx=102400, max_num_seqs=1, mem_util=None,
+        compose_path="models/gemma-4-31b/beellama/compose/single/beellama-q4ks-dflash/dflash.yml",
+        default_port=8061,
+        kvcalc_key="SKIP",
+        status="experimental",
+        status_note="Requires locally-built beellama-cpp:local image (unpublished upstream — build via beellama.cpp .devops/cuda.Dockerfile + FA_ALL_QUANTS).",
     ),
 
     # v0.7.3 MoE onboarding — Gemma 4 26B-A4B + Qwen 3.6 35B-A3B.

@@ -256,7 +256,8 @@ Q1: Does the model fit your VRAM at desired quant?
 | **Qwen3.6-27B** (dense hybrid, fits VRAM) | **vLLM** + Genesis patches | Multi-tenant, full feature set, Cliff 1/2 closed on TP=2 |
 | **Qwen3.6-27B** (single-card no-cliffs path) | **llama.cpp** | Different memory model; no Cliff 2b under multi-turn |
 | **Qwen3.6-27B** (single-card with MTP, no PR-branch building) | **ik_llama.cpp** | MTP merged on main — get the ~+34% TPS lift without rebuilding from PR #22673 |
-| **Gemma 4 31B** | **vLLM** + MTP/DFlash overlays | Best spec-decode story, vision support |
+| **Gemma 4 31B** (dual-card) | **vLLM** + MTP/DFlash overlays | Best spec-decode story, vision support |
+| **Gemma 4 31B** (single-card long-ctx + spec-dec) | **beellama.cpp** (experimental, locally-built image) | Only single-card engine with Gemma-4 windowed KV *and* DFlash spec-dec in one GGUF |
 | **Carnice / Qwopus / variants** | **vLLM** | Same daily-driver path |
 | **(future) MiniMax-M2.7-REAP-172B** | **ktransformers** + SGLang | Big-MoE > VRAM, router-aware caching is the unlock |
 | **(future) GPT-OSS-120B** | **ktransformers** or **llama.cpp** `--n-cpu-moe` | Either works; ktransformers ~+20% TPS but harder to deploy |
@@ -296,6 +297,28 @@ Q1: Does the model fit your VRAM at desired quant?
 - **Diverging quant naming from mainline** — IQ_K series flags differ; cross-engine GGUF compatibility caveats.
 - **Spec-decode coverage** — MTP merged + two-stage ngram+MTP ([PR #1789](https://github.com/ikawrakow/ik_llama.cpp/pull/1789)) + hybrid-aware recurrent checkpoints ([PR #1774](https://github.com/ikawrakow/ik_llama.cpp/pull/1774)). No EAGLE3 / DFlash; lags mainline on those research paths.
 - **Smaller maintainer surface** — primarily Iwan Kawrakow + a handful of contributors. Not the right pick for production where you need >1 person to debug a kernel issue.
+
+### beellama.cpp
+
+[beellama.cpp](https://github.com/Anbeeld/beellama.cpp) is Anbeeld's llama.cpp fork. Its two fork-exclusive levers are **DFlash** (cross-attention speculative decoding — a small DFlash draft GGUF reads the target's recent hidden states and predicts multiple tokens ahead, verified in one target pass) and **TurboQuant / TCQ KV cache types** on top of mainline-lineage **SWA-aware windowed KV**. On this stack it is the single-card answer for two cases the other engines can't cover together:
+
+- **Gemma-4-31B single-card long-context + spec-dec** — the only engine that does Gemma-4 windowed KV (big context) *and* a Gemma-4 spec-dec arch in one GGUF. ik_llama has the MTP arch but allocates full KV (≈24K single-card wall); mainline llama.cpp windows KV but its plain Gemma-4 decode is slow (~10 TPS).
+- **Qwen3.6-27B tool-grammar-neutral spec-dec** — the external DFlash drafter does not share the target distribution, so it does not amplify the CodeAct attractor the built-in MTP head does ([club-3090#237](https://github.com/noonghunna/club-3090/discussions/237)).
+
+Honest gaps:
+
+- **No published / pullable Docker image** — upstream ships Windows binaries + source only. The shipped beellama composes (`beellama/dflash`, `beellama/gemma-dflash`) are 🧪 **Experimental** and reference a **locally-built** image `beellama-cpp:local`; the model-default resolver skips them until an image is published. **Other users must build the image themselves.** From a clone of the fork (Linux GCC + CUDA):
+
+  ```bash
+  cmake -B build -DGGML_CUDA=ON -DGGML_NATIVE=ON \
+    -DGGML_CUDA_FA=ON -DGGML_CUDA_FA_ALL_QUANTS=ON \
+    -DCMAKE_CUDA_ARCHITECTURES=86 -DCMAKE_BUILD_TYPE=Release
+  cmake --build build -j
+  ```
+
+  Use `-DCMAKE_CUDA_ARCHITECTURES=89` for an RTX 4090, `120` for a 5090, etc. To produce the `beellama-cpp:local` Docker image the composes expect, bake the fork's `.devops/cuda.Dockerfile` with `CUDA_DOCKER_ARCH=86` (or your arch) and the `-DGGML_CUDA_FA_ALL_QUANTS=ON` flag added — the stock Dockerfile omits it, and **`FA_ALL_QUANTS` is required for the TurboQuant / TCQ cache types** (and for the `q5_0`/`q4_1` KV the composes default to). Override the image tag per-launch with `BEELLAMA_IMAGE=...`.
+- **Server target ENTRYPOINT is `/app/llama-server`** — compose `command:` is server flags only (same shape as the ik-llama / llama-cpp composes).
+- **Single-stream / `-np 1`** — DFlash is single-slot by default; same compute-bound single-card caveat as the other llama.cpp-family composes.
 
 ---
 
