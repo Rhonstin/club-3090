@@ -5,7 +5,7 @@ type: vllm
 stability: nightly
 install:
   method: docker_image
-  spec: vllm/vllm-openai:nightly-01d4d1ad375dc5854779c593eee093bcebb0cada
+  spec: vllm/vllm-openai:nightly-3fd9d2d35714e80b4cb3fcd3c408a0398fa2525f
 min_sm: 7.5
 supported_model_families:
   - dense

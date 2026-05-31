@@ -6,7 +6,7 @@
 #   KV:        turboquant_3bit_nc (TQ3)
 #   Vision:    yes
 #   Max ctx:   48K (mem-util 0.92 — safe single-card default)
-#   Genesis:   v7.72.2 (full PROD env stack)
+#   Genesis:   v7.72.5 (full PROD env stack)
 #   Status:    ✅ Production
 #   Best for:  Single-card default — vision + tools + MTP + Cliff-safe at
 #              <48K ctx; recommended starting point for 1× 3090

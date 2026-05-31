@@ -1,7 +1,7 @@
 # ===========================================================================
 # Profile (at-a-glance):
 #   Model:     Qwen3.6-27B (ubergarm MTP-IQ4_KS GGUF — imatrix IQK quant)
-#   Engine:    ik_llama.cpp (ghcr.io/ikawrakow/ik-llama-cpp:cu13-server)
+#   Engine:    ik_llama.cpp (ghcr.io/ikawrakow/ik-llama-cpp:cu12-server)
 #   Topology:  Single 3090 (TP=1)
 #   Drafter:   MTP n=2, p-min 0.0 (built-in MTP head)
 #   KV:        q4_0 K + q4_0 V (default — max-context-first; -khad/-vhad
@@ -64,9 +64,12 @@
 #      too. (vLLM keeps its own froggeric copy under vllm/patches/.)
 #
 # Engine pinned by digest (engine policy):
-#   ghcr.io/ikawrakow/ik-llama-cpp:cu13-server
-#     @sha256:c13e0798e4117649962833adc932362b64cb7080cfc9dbb1235161f43f8d5c49
-#   cu13 = matches our CUDA 13.2 host driver.
+#   ghcr.io/ikawrakow/ik-llama-cpp:cu12-server
+#     @sha256:d03206b5f9f80777313d60f11172506a145791e5db6ce2b8ed5c59fe6d287acf
+#   cu12 (CUDA 12.6.2) — switched from cu13 2026-05-28: cu13 (CUDA 13.1.1) needs
+#   cuda>=13.1; driver 580.126.09 only supports CUDA 13.0 natively. RTX 3090 is a
+#   consumer GPU with no Forward Compatibility support → cu13 fell back to CPU.
+#   cu12 requires driver>=470, works fine on 580.x.
 #
 # Quick start:
 #   1. Get the MTP-IQ4_KS GGUF:
@@ -101,7 +104,7 @@
 
 services:
   ik-llama-qwen36-27b-iq4ks-mtp:
-    image: ${IK_LLAMA_IMAGE:-ghcr.io/ikawrakow/ik-llama-cpp:cu13-server}
+    image: ${IK_LLAMA_IMAGE:-ghcr.io/ikawrakow/ik-llama-cpp:cu12-server}
     container_name: "${ESTATE_CONTAINER:-ik-llama-qwen36-27b}"
     restart: unless-stopped
     ports:
@@ -144,7 +147,7 @@ services:
       --top-p ${TOP_P:-0.95}
       --top-k ${TOP_K:-20}
       --min-p ${MIN_P:-0.0}
-      --repeat-penalty ${REPEAT_PENALTY:-1.0}
+      --repeat-penalty ${REPEAT_PENALTY:-1.1}
     deploy:
       resources:
         reservations:

@@ -1,13 +1,3 @@
-# ===========================================================================
-# ⚠️  KNOWN ISSUE 2026-05-05 — Cliff 2b at >50K single-prompt context
-#     Genesis v7.72.2 PN59 streaming-GDN was advertised as the structural
-#     Cliff 2b fix but doesn't engage on the chunked-prefill code path
-#     24 GB single-card configs are forced to take. Filed at:
-#         https://github.com/Sandermage/genesis-vllm-patches/issues/22
-#     Workarounds: use dual/docker-compose.yml / dual-turbo.yml (TP=2
-#     escapes the cliff) or llamacpp recipes (different engine, no
-#     Cliff 2b). See docs/CLIFFS.md for the full diagnosis.
-# ===========================================================================
 # Profile (at-a-glance):
 #   Model:     Qwen3.6-27B (Lorbus AutoRound INT4 + BF16 mtp.fc preserved)
 #   Topology:  Single 3090 (TP=1)
@@ -15,9 +5,9 @@
 #   KV:        turboquant_3bit_nc (TQ3)
 #   Vision:    no (text-only — frees VRAM for ctx)
 #   Max ctx:   180K (was 214K pre-Cliff-2b; reduced for safety)
-#   Genesis:   v7.72.2
-#   Status:    ⚠️ Production w/ caveats
-#   Caveats:   Cliff 2b at >50K single-prompt context (Genesis PN59 doesn't engage on chunked-prefill). NOT IDE-agent safe. Filed at Sandermage/genesis-vllm-patches#22. Workaround: dual.yml or llamacpp/default.
+#   Genesis:   v7.72.5
+#   Status:    🧪 Experimental
+#   Caveats:   Cliff 2b partially mitigated in v7.72.5 (GDN alloc 1.37 GiB → 365 MiB) but verify-stress 1/8 on 3fd9d2d+fbecee31 (2026-05-31): 25K tool-prefill still OOM. Level 3 needed. NOT agent-safe.
 #   Best for:  RAG / single-shot summarization at <25K accumulated ctx;
 #              for IDE agents use tools-text.yml or dual.yml instead
 # ---------------------------------------------------------------------------

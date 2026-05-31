@@ -6,7 +6,7 @@
 #   KV:        turboquant_3bit_nc (TQ3)
 #   Vision:    yes
 #   Max ctx:   180K
-#   Genesis:   v7.72.2 (full PROD env stack)
+#   Genesis:   v7.72.5 (full PROD env stack)
 #   Status:    ✅ Production
 #   Best for:  Reasoning/coding workloads with bounded thinking budget
 #              via FSM-constrained scratchpad grammar — caps think budget,

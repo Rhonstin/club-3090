@@ -30,7 +30,17 @@ DST_CC="/usr/local/lib/python3.12/dist-packages/vllm/entrypoints/openai/chat_com
 SRC_ENGINE="${CLUB3090_PR35936_ENGINE_SRC:-/etc/club3090/pr35936-engine-serving.py}"
 DST_ENGINE="/usr/local/lib/python3.12/dist-packages/vllm/entrypoints/openai/engine/serving.py"
 
-if [ -r "$SRC_CC" ]; then
+# If vllm.beam_search no longer exists, our overlay files reference a removed API.
+# Check the actual Python module (not the potentially-overwritten RW-layer file).
+# PR35936 fix is present natively in nightlies that removed beam_search.
+if ! python3 -c "import vllm.beam_search" 2>/dev/null; then
+  echo "[club3090/pr35936] vllm.beam_search removed in this nightly — PR35936 fix is native, skipping both overlays" >&2
+  exit 0
+fi
+
+if grep -q "supports_required_and_named" "$DST_CC" 2>/dev/null; then
+  echo "[club3090/pr35936] chat_completion/serving.py already has PR35936 fix — skipping" >&2
+elif [ -r "$SRC_CC" ]; then
   cp "$SRC_CC" "$DST_CC"
   echo "[club3090/pr35936] chat_completion/serving.py installed from $SRC_CC" >&2
 else

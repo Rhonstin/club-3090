@@ -1,7 +1,7 @@
 # ===========================================================================
 # Profile (at-a-glance):
 #   Model:     Qwen3.6-27B (ubergarm MTP-IQ4_KS GGUF — imatrix IQK quant)
-#   Engine:    ik_llama.cpp (ghcr.io/ikawrakow/ik-llama-cpp:cu13-server)
+#   Engine:    ik_llama.cpp (ghcr.io/ikawrakow/ik-llama-cpp:cu12-server)
 #   Topology:  Single 3090 (TP=1)
 #   Drafter:   TWO-STAGE: ngram-mod (self-spec, context-matching) + MTP fallback
 #              Stage 1: ngram-mod n_max=4, n_min=2, ngram-size-n=16
@@ -95,7 +95,7 @@
 
 services:
   ik-llama-qwen36-27b-two-stage:
-    image: ${IK_LLAMA_IMAGE:-ghcr.io/ikawrakow/ik-llama-cpp:cu13-server}
+    image: ${IK_LLAMA_IMAGE:-ghcr.io/ikawrakow/ik-llama-cpp:cu12-server}
     container_name: "${ESTATE_CONTAINER:-ik-llama-qwen36-27b-two-stage}"
     restart: unless-stopped
     ports:
@@ -136,7 +136,7 @@ services:
       --top-p ${TOP_P:-0.95}
       --top-k ${TOP_K:-20}
       --min-p ${MIN_P:-0.0}
-      --repeat-penalty ${REPEAT_PENALTY:-1.0}
+      --repeat-penalty ${REPEAT_PENALTY:-1.1}
     deploy:
       resources:
         reservations:

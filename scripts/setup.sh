@@ -444,11 +444,11 @@ echo "Model dir:    ${MODEL_DIR}"
 # v7.69 also retains v7.68's accept-and-fold of our 3 cross-rig sidecars:
 # PN25 v7.68 (TP=1 worker-spawn registration), PN30 v7.68 (DS conv-state
 # layout dst-shaped temp), PN34 (vllm#39226 runtime workspace_lock).
-# Pinned to dev SHA 2db18df because v7.69 is feature-complete on dev pending
-# our retest validation; if clean, Sander will tag stable.
+# v7.72.5 (fbecee31) — Cliff 2b club-3090#22 fix: PN59 now engages on
+# chunked-prefill (Level 1+2). Bumped from v7.72.2 (7b9fd319) 2026-05-31.
 # Bumping GENESIS_PIN requires re-running verify-stress.sh against your composes
 # to confirm the new commit works on your config.
-GENESIS_PIN="${GENESIS_PIN:-7b9fd319}"
+GENESIS_PIN="${GENESIS_PIN:-fbecee31}"
 
 if [[ "${NEEDS_GENESIS:-1}" != "1" ]]; then
   echo "[genesis] ${MODEL_NAME} doesn't use Genesis — skipping clone."

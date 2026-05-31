@@ -1,7 +1,7 @@
 # ===========================================================================
 # Profile (at-a-glance):
 #   Model:     Qwen3.6-27B (ubergarm MTP-IQ4_KS GGUF) + mmproj-F16
-#   Engine:    ik_llama.cpp (ghcr.io/ikawrakow/ik-llama-cpp:cu13-server)
+#   Engine:    ik_llama.cpp (ghcr.io/ikawrakow/ik-llama-cpp:cu12-server)
 #   Topology:  Single 3090 (TP=1)
 #   Drafter:   MTP n=2, p-min 0.0 (built-in MTP head)
 #   KV:        q4_0 K + q4_0 V
@@ -112,7 +112,7 @@
 
 services:
   ik-llama-qwen36-27b-iq4ks-mtp-vision:
-    image: ${IK_LLAMA_IMAGE:-ghcr.io/ikawrakow/ik-llama-cpp:cu13-server}
+    image: ${IK_LLAMA_IMAGE:-ghcr.io/ikawrakow/ik-llama-cpp:cu12-server}
     container_name: "${ESTATE_CONTAINER:-ik-llama-qwen36-27b-vision}"
     restart: unless-stopped
     ports:
@@ -158,7 +158,7 @@ services:
       --top-p ${TOP_P:-0.95}
       --top-k ${TOP_K:-20}
       --min-p ${MIN_P:-0.0}
-      --repeat-penalty ${REPEAT_PENALTY:-1.0}
+      --repeat-penalty ${REPEAT_PENALTY:-1.1}
     deploy:
       resources:
         reservations:
