@@ -9,8 +9,11 @@
 #              196,527 tok @ mem-util 0.95. For native 262K use vllm/gemma-int8-mtp.
 #   Genesis:   N/A — Genesis is Qwen3-Next-specific
 #   Status:    ✅ Production
-#   Quality:   126/150 (84%) — det 56/75 (75%) · sandbox 70/75 (93%, v0.4 shape-check) (--full, 2026-05-09)
-#                TC 60% · IF 87% · SO 87% · DE 100% · RM 40% · BF 100% · HA 100% · CLI 88%
+#   Quality:   reasoning-ON 111/150 (74%) — det 65/75 · sandbox 46/75
+#                TC 14/15 · IF 14/15 · SO 14/15 · DE 11/15 · RM 12/15 · BF 15/15 · HA 12/20 · CLI 19/40
+#                (--full, --enable-thinking, --reasoning-parser gemma4, v0.22.0, 2026-05-31). Thinking-OFF
+#                default NOT separately 8-packed this round (≈ int8-mtp's 105/150, KV near-lossless).
+#                Supersedes the 2026-05-09 126/150 (looser v0.4 shape-check grader — not comparable).
 #   Best for:  Gemma 4 dual-card STABLE long-ctx (stock v0.22.0 KV, 131K) — vision + tools.
 #              The dual default is vllm/gemma-int8-mtp (native 262K); use this when you want
 #              the stable bf16 KV path (no #40391 per-head-KV overlay) and 131K ctx is enough.
