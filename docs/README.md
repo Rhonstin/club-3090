@@ -76,5 +76,6 @@ These are cross-cutting references both tracks reach for.
 | [`DTYPE_MATRIX.md`](DTYPE_MATRIX.md) | Supported dtype × model × engine matrix. |
 | [`KERNEL_MATRIX.md`](KERNEL_MATRIX.md) | Quant-kernel availability and alignment constraints. |
 | [`QUALITY_TEST.md`](QUALITY_TEST.md) | The quality-test harness and what it measures. |
+| [`RESULTS_CARD.md`](RESULTS_CARD.md) | The standard 3-panel format (Serving · Quality · Takeaways) for sharing a config's measured results. |
 | [`STRUCTURED_COT.md`](STRUCTURED_COT.md) | The bounded-thinking / structured-CoT compose path. |
 | [`TQ3_MTP_GENESIS.md`](TQ3_MTP_GENESIS.md) | TQ3 KV × MTP × Genesis-patch results and config. |
