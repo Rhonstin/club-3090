@@ -19,8 +19,7 @@ You have **2× RTX 3090s**. This page is the front door for picking a config and
 | **Hermes agentic fine-tune** (Carnice tool specialization) | [`carnice-bf16mtp.yml`](../models/qwen3.6-27b/vllm/compose/dual/carnice-bf16mtp/bf16-mtp.yml) | **262K** | **72 / 80** | ~22.3 / 24 GB | BF16 MTP overlay. Hermes-style assistant. Available on HF: [wasifb/Carnice_V2_27B_INT4_BF16MTP](https://huggingface.co/wasifb/Carnice_V2_27B_INT4_BF16MTP) |
 | General-purpose default (vision + tools + long ctx) | [`dual.yml`](../models/qwen3.6-27b/vllm/compose/dual/autoround-int4/fp8-mtp.yml) ⭐ | **262K** (237K single-prompt verified) | **69 / 89** | ~23.6 / 24 GB | fp8 KV, 2 streams, full feature set |
 | Multi-tenant (4 concurrent agents at full ctx) | [`dual-turbo.yml`](../models/qwen3.6-27b/vllm/compose/dual/autoround-int4/turbo.yml) | **262K** | **58 / 76** per-stream (269 TPS aggregate at 4 streams) | ~19.8 / 24 GB | TQ3 KV (3 bits/token) + full v7.69 PROD env-var stack — 4.67× concurrency. **20 GB Ampere users:** override `--kv-cache-dtype turboquant_3bit_nc` → `fp8_e5m2`; see [HARDWARE.md](HARDWARE.md#note-for-sub-24-gb-cards) + [#47](https://github.com/noonghunna/club-3090/issues/47). |
-| Peak code TPS with vision | [`dual-dflash.yml`](../models/qwen3.6-27b/vllm/compose/dual/autoround-int4/dflash.yml) | **185K** | **82 / 125** | ~23.6 / 24 GB | DFlash N=5 + 1.75 GB draft per card, AL ~4.4 (vs MTP's 3.4) |
-| Peak code TPS, no vision | [`dual-dflash-noviz.yml`](../models/qwen3.6-27b/vllm/compose/dual/autoround-int4/dflash-noviz.yml) | **200K** | **78 / 127** | ~23.8 / 24 GB | DFlash + no vision, +15K ctx vs dual-dflash |
+| Peak code TPS (DFlash) | **`beellama/qwen-dflash-dual`** — vLLM `dual-dflash*` ~~deprecated~~ | 262K | ~145 code | — | ⚠️ **vLLM `dual-dflash` / `dual-dflash-noviz` deprecated 2026-05-31** — superseded by `dual.yml` + stranded on a now-purged nightly; DFlash on dual moved to beellama (v0.3.0 🧪). Rationale + original numbers: [#297](https://github.com/noonghunna/club-3090/discussions/297). |
 
 ### Gemma 4 31B (dual-card only on Ampere 24 GB ¹)
 
@@ -29,7 +28,7 @@ You have **2× RTX 3090s**. This page is the front door for picking a config and
 | General-purpose default (vision + tools + long ctx) | [`gemma-bf16-mtp`](../models/gemma-4-31b/vllm/compose/dual/autoround-int4/bf16-mtp.yml) ⭐ | **131K** | **119 / 154** | ~22.2 / 24 GB | bf16 KV, MTP n=4 (Google's official `gemma-4-31B-it-assistant` drafter), stock v0.22.0 **no overlay**. KV pool 196,527 tok @ 0.95; `max-num-seqs=4` cap. NIAH-validated to 120K. PR [#41745](https://github.com/vllm-project/vllm/pull/41745) merged upstream. |
 | Long-context default (262K ctx, balanced TPS) | [`dual-int8.yml`](../models/gemma-4-31b/vllm/compose/dual/autoround-int4/int8.yml) | **262K** | **95 / 126** | ~22.1 / 24 GB | INT8 PTH KV via vendored PR [#40391](https://github.com/vllm-project/vllm/pull/40391) overlay. **8.2× context lift** for ~10% TPS cost. NIAH PASS at 137K. |
 | Multi-stream long-context (3.6× concurrency at 98K) | [`dual-int8.yml`](../models/gemma-4-31b/vllm/compose/dual/autoround-int4/int8.yml) (override `MAX_NUM_SEQS=4`) | 98K | **96 / 127** per-stream | ~22.2 / 24 GB | INT8 PTH KV pool 354K tokens → 3.6× concurrency. |
-| Peak code TPS with vision | [`dual-dflash.yml`](../models/gemma-4-31b/vllm/compose/dual/autoround-int4/dflash.yml) | 32K | **105 / 177** | ~22.3 / 24 GB | z-lab Gemma 4 DFlash drafter, n=7. **+18% code TPS over MTP** (177 vs 141). bf16 KV. |
+| Peak code TPS (DFlash) | **`beellama/gemma-dflash-dual`** — vLLM Gemma DFlash removed | 262K | ~157 code | — | ⚠️ **vLLM Gemma-4 DFlash removed** — unservable on Ampere ([#40382](https://github.com/vllm-project/vllm/issues/40382)); beellama DFlash (v0.3.0 🧪) replaces it at 262K vs the old 32K. |
 
 ¹ Single-card boot OOMs on Ampere 24 GB regardless of KV format. Single-card Gemma 4 is feasible on 32 GB+ GPUs (validated on RTX 5090 32 GB by [@apnar](https://github.com/noonghunna/club-3090/discussions/67#discussioncomment-16832042) — 160/215 TPS at 32K MTP, 150/261 at 12K DFlash). Tracked in [`docs/UPSTREAM.md`](UPSTREAM.md) row 78 + [#67](https://github.com/noonghunna/club-3090/discussions/67).
 
@@ -99,7 +98,9 @@ For the single-card picture, see [`SINGLE_CARD.md`](SINGLE_CARD.md).
 
 **When to pick:** real concurrent load. Solo users won't see the win on the per-stream curve — but per-stream TPS at n=4 is essentially the same as n=1 here (74 vs 76 TPS code), so this is also a viable single-stream config if you want max KV pool. Pick this if you ever serve >1 request at a time, or want the biggest single-card-equivalent context.
 
-### Peak code TPS, with vision — `dual-dflash.yml`
+### Peak code TPS, with vision — `dual-dflash.yml` ⚠️ DEPRECATED (2026-05-31)
+
+> **Deprecated — kept for historical reference.** Pruned 2026-05-31: superseded by `dual.yml` (262K + vision + 2 streams, stable image) and stranded on a [now-purged vLLM nightly](https://github.com/noonghunna/club-3090/discussions/297). **DFlash on dual now lives on beellama** → `bash scripts/switch.sh --force beellama/qwen-dflash-dual` (Qwen3.6-27B, full 262K, v0.3.0 🧪 — pre-release, expect it to move). Full rationale: [#297](https://github.com/noonghunna/club-3090/discussions/297). The numbers below are the original vLLM measurements.
 
 **Workload:** code-heavy single-stream — fast iteration on quicksort-class problems, Cline going through a codebase, Cursor doing inline completions in a heavy file.
 
@@ -119,7 +120,9 @@ Without it, vLLM falls back silently to baseline bf16 decode (~25 TPS, not 125).
 - DFlash's per-position acceptance falls off faster than MTP — narrative TPS (82) is good but not dramatically better than `dual.yml`'s 69. The win is concentrated on code/repetitive prompts.
 - The z-lab draft is **still under training** (see [UPSTREAM.md](UPSTREAM.md#luce-dflash-luce-orglucebox-hub--separate-llamacpp-fork-not-our-vllm-dual-dflash)). Published 125 TPS code is against the 2026-04-26 snapshot at peak code-prompt conditions; agent traffic with mixed code + narrative + tool schemas will see lower per-stream TPS until z-lab tags training-complete. **For autonomous coding agents (Cline / OpenCode / Pi / Claude Code) prefer `dual.yml` (FP8 + MTP) until then** — its 89 code TPS is robust across prompt shapes.
 
-### Peak code TPS, no vision — `dual-dflash-noviz.yml`
+### Peak code TPS, no vision — `dual-dflash-noviz.yml` ⚠️ DEPRECATED (2026-05-31)
+
+> **Deprecated** (same as the vision variant) — pruned 2026-05-31, on a purged nightly; DFlash on dual moved to beellama (`beellama/qwen-dflash-dual`). See [#297](https://github.com/noonghunna/club-3090/discussions/297). Numbers below are the original vLLM measurements.
 
 **Workload:** same as above, but no images. Squeezes another 15K of context out of the vision-tower's space.
 
