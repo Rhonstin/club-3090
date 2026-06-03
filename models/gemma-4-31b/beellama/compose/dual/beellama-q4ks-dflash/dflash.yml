@@ -23,11 +23,13 @@
 #                   devices; enabling GPU cross ring". --spec-draft-device CUDA0 no longer
 #                   ggml_aborts (Anbeeld's "explicit draft device" fix).
 #                ✅ CODE DFlash: up to ~157 TPS dual (≈4.2× the ~37 no-spec baseline), accept 0.33–0.64.
-#                ⚠️ PROSE acceptance REGRESSED to ~0.07 → ~35 TPS (net-negative vs no-spec).
-#                   IDENTICAL single + dual → NOT multi-GPU; a v0.3.0-wide DFlash-on-prose
-#                   regression (old b9459 was ~0.20 prose, net-positive). Qwen3.6-27B (DeltaNet,
-#                   NOT SWA-windowed) shows the identical collapse → NOT the SWA mismatch; a
-#                   cross-model v0.3.0 DFlash regression. Code unaffected.
+#                ↩️ PROSE "regression" RETRACTED 2026-06-03: the ~0.07 AR / net-negative
+#                   claim did NOT reproduce. Re-test on tok/s vs a measured no-spec baseline
+#                   shows DFlash prose net-POSITIVE — qwen single +27% / dual +52%, gemma
+#                   single +28–31%. It was a noisy AR over-read (the adaptive-DM AR varies
+#                   per prompt/draft-state — beellama #288) compounded by a wrong no-spec
+#                   baseline (~37; real dual-Q8 = 23.4). This gemma-q4ks dual was not
+#                   separately re-benched. See learnings/gemma-4-31b.md 2026-06-03.
 #                ❌ MTP (--spec-type mtp + radamanthys-assistant Q8_0): "unknown model
 #                   architecture: gemma4_mtp" — unsupported on this build (distinct from the
 #                   CLOSED Anbeeld #36, which was garbage MTP *output* on Qwen, not arch-load).
