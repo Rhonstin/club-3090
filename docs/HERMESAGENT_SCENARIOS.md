@@ -20,7 +20,7 @@
 | HA-07 | — | Multi-step з tool-use | Medium | ✅ більшість |
 | HA-08 | Browser automation export scenario | Автоматизація браузера + експорт артефакту | Hard | ❌ **всі моделі** (системна межа) |
 | HA-09 | — | Tool-call + reasoning | Medium | ✅ більшість |
-| HA-10 | — | — | Easy | ✅ більшість |
+| HA-10 | Discover and apply existing skill | Знайти існуючий skill файл і правильно його застосувати | Easy | ✅ майже всі; ❌ Qwen3-Coder-30B (єдина модель!) |
 | HA-11 | — | — | Easy | ✅ майже всі |
 | HA-12 | Supporting skill file scenario | Написати допоміжний файл з точним вмістом (exactContent перевіряється) | Medium | ✅ Qwen3.6; ❌ GLM-4.7 (файл є але вміст неточний) |
 | HA-13 | — | — | Easy | ✅ більшість |
@@ -73,6 +73,7 @@
 | Q4_K_M 35B-A3B MTP n=4 | 12/20 (60%) | HA-02/06/08/14/16/17/19/20 | HA-04 |
 | byteshape IQ4_XS MTP | 12/20 (60%) | — | — |
 | Q5_K_XL 35B ncmoe=8 | 12/20 (60%) | HA-04/06/08/14/16/17/19/20 | — |
+| Qwen3-Coder-30B-A3B Q4_K_M | **9/20 (45%) ← LOWEST** | HA-04/05/06/**10**/12/14/16/17/19/20 | — |
 
 ---
 
