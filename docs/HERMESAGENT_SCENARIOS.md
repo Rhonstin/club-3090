@@ -57,9 +57,14 @@
 
 ## Профілі провалів по моделях
 
+> **beellama/DFlash правило:** завжди запускати з `--reasoning off`. Thinking ON → DFlash suppressed на tool call markers → −10 pp. Стабільно на b9459 і v0.3.0.
+
 | Модель | Score | Унікальні провали | Унікальні проходи |
 |---|---|---|---|
-| Carnice I-Quality 35B-A3B | 17/20 (85%) | HA-04, HA-16, HA-17 | **HA-20** (єдина!) |
+| Carnice I-Quality 35B-A3B | 17/20 (85%) | HA-04, HA-16, HA-17 | **HA-20** (разом з Deck-Opus) |
+| Deck-Opus 40B Q4_K_S | 15/20 (75%) | HA-04, HA-08, HA-16, HA-17, HA-19 | **HA-20**, HA-05, HA-06, HA-12, HA-14 |
+| beellama v0.3.0 DFlash thinking **ON** | 12/20 (60%) | HA-08/11/12/14/16/17/19/20 | HA-04 (!) |
+| beellama b9459 DFlash thinking **OFF** | 14/20 (70%) | — | — |
 | Q5_K_XL 27B MTP n=3 ctx=32K | 15/20 (75%) | HA-08/14/16/17/19/20 | — |
 | GLM-4.7-Flash Q5_K_L | 13/20 (65%) | HA-05, HA-08, HA-12, HA-16/17/19/20 | HA-02, HA-04, HA-06, HA-14 |
 | Q5_K_XL 27B MTP n=2 ctx=65K | 13/20 (65%) | HA-04/08/14/16/17/19/20 | — |
