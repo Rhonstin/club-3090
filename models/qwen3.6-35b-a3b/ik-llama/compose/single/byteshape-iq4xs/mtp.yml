@@ -1,7 +1,7 @@
 # ===========================================================================
 # Profile (at-a-glance):
 #   Model:     Qwen3.6-35B-A3B (byteshape IQ4_XS 4.19bpw GGUF)
-#   Engine:    ik_llama.cpp (ghcr.io/ikawrakow/ik-llama-cpp:cu13-server)
+#   Engine:    ik_llama.cpp (ghcr.io/ikawrakow/ik-llama-cpp:cu12-server)
 #   Topology:  Single 3090 (TP=1)
 #   Drafter:   MTP n=2, p-min 0.0 (built-in MTP head — byteshape/Qwen3.6-35B-A3B-MTP-GGUF)
 #   KV:        q4_0 K + q4_0 V + -khad/-vhad Hadamard
@@ -51,7 +51,7 @@
 
 services:
   ik-llama-qwen36-35b-a3b-byteshape-iq4xs:
-    image: ${IK_LLAMA_IMAGE:-ghcr.io/ikawrakow/ik-llama-cpp:cu13-server}
+    image: ${IK_LLAMA_IMAGE:-ghcr.io/ikawrakow/ik-llama-cpp:cu12-server}
     container_name: "${ESTATE_CONTAINER:-ik-llama-qwen36-35b-a3b-byteshape}"
     restart: unless-stopped
     ports:
