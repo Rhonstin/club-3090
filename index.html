@@ -3,14 +3,14 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>solo3090 — Single RTX 3090 LLM Research</title>
-<meta name="description" content="Real benchmarks across 150 scenarios, 8 models, 3 runs each on a single RTX 3090 24GB. Which LLM actually wins — and where each one breaks.">
-<meta property="og:title" content="solo3090 — Single RTX 3090 LLM Research">
-<meta property="og:description" content="8 models × 150 scenarios × 3 runs. Full leaderboard, per-pack breakdown, findings.">
+<title>inferrank — Budget GPU LLM Leaderboard</title>
+<meta name="description" content="Budget GPU LLM inference leaderboard. Real benchmarks across 150 scenarios on consumer and mining hardware — not datacenter GPUs.">
+<meta property="og:title" content="inferrank — Budget GPU LLM Leaderboard">
+<meta property="og:description" content="Real LLM benchmarks on budget GPUs — RTX 3060, CMP 90HX, mining cards. 150 scenarios, 8 quality packs.">
 <meta property="og:type" content="website">
 
 <!-- Favicon -->
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230a0e1a'/%3E%3Crect x='6' y='6' width='20' height='20' rx='4' fill='none' stroke='%2338bdf8' stroke-width='2'/%3E%3Crect x='10' y='10' width='12' height='12' rx='2' fill='%2338bdf8' opacity='.15'/%3E%3Cline x1='10' y1='3' x2='10' y2='6' stroke='%2338bdf8' stroke-width='1.5' stroke-linecap='round'/%3E%3Cline x1='16' y1='3' x2='16' y2='6' stroke='%2338bdf8' stroke-width='1.5' stroke-linecap='round'/%3E%3Cline x1='22' y1='3' x2='22' y2='6' stroke='%2338bdf8' stroke-width='1.5' stroke-linecap='round'/%3E%3Cline x1='10' y1='26' x2='10' y2='29' stroke='%2338bdf8' stroke-width='1.5' stroke-linecap='round'/%3E%3Cline x1='16' y1='26' x2='16' y2='29' stroke='%2338bdf8' stroke-width='1.5' stroke-linecap='round'/%3E%3Cline x1='22' y1='26' x2='22' y2='29' stroke='%2338bdf8' stroke-width='1.5' stroke-linecap='round'/%3E%3Cline x1='3' y1='10' x2='6' y2='10' stroke='%2338bdf8' stroke-width='1.5' stroke-linecap='round'/%3E%3Cline x1='3' y1='16' x2='6' y2='16' stroke='%2338bdf8' stroke-width='1.5' stroke-linecap='round'/%3E%3Cline x1='3' y1='22' x2='6' y2='22' stroke='%2338bdf8' stroke-width='1.5' stroke-linecap='round'/%3E%3Cline x1='26' y1='10' x2='29' y2='10' stroke='%2338bdf8' stroke-width='1.5' stroke-linecap='round'/%3E%3Cline x1='26' y1='16' x2='29' y2='16' stroke='%2338bdf8' stroke-width='1.5' stroke-linecap='round'/%3E%3Cline x1='26' y1='22' x2='29' y2='22' stroke='%2338bdf8' stroke-width='1.5' stroke-linecap='round'/%3E%3Ctext x='16' y='19.5' font-family='monospace' font-size='8' font-weight='bold' fill='%2338bdf8' text-anchor='middle'%3ES3%3C/text%3E%3C/svg%3E">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230a0e1a'/%3E%3Crect x='4' y='4' width='24' height='24' rx='5' fill='none' stroke='%2338bdf8' stroke-width='1.5'/%3E%3Cline x1='8' y1='22' x2='8' y2='14' stroke='%2338bdf8' stroke-width='2.5' stroke-linecap='round'/%3E%3Cline x1='13' y1='22' x2='13' y2='10' stroke='%2338bdf8' stroke-width='2.5' stroke-linecap='round'/%3E%3Cline x1='18' y1='22' x2='18' y2='16' stroke='%2338bdf8' stroke-width='2.5' stroke-linecap='round'/%3E%3Cline x1='23' y1='22' x2='23' y2='12' stroke='%2338bdf8' stroke-width='2.5' stroke-linecap='round'/%3E%3Cline x1='6' y1='22' x2='25' y2='22' stroke='%2338bdf8' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E">
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -335,8 +335,8 @@
 <nav>
   <div class="nav-left">
     <a href="#" class="nav-logo">
-      <div class="nav-logo-icon">S3</div>
-      <span class="nav-brand">solo3090</span>
+      <div class="nav-logo-icon">IR</div>
+      <span class="nav-brand">inferrank</span>
     </a>
     <div class="nav-links">
       <a href="#leaderboard">Full suite</a>
@@ -349,7 +349,7 @@
     </div>
   </div>
   <div class="nav-right">
-    <a href="https://github.com/Rhonstin/solo3090" target="_blank" class="btn btn-secondary" style="padding:0.35rem 0.8rem;font-size:0.8rem">
+    <a href="https://github.com/Rhonstin/inferrank" target="_blank" class="btn btn-secondary" style="padding:0.35rem 0.8rem;font-size:0.8rem">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
       GitHub
     </a>
@@ -363,14 +363,14 @@
 <div class="hero">
   <div class="hero-badge">
     <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="10"/></svg>
-    Single RTX 3090 · 24 GB
+    Budget GPU · Consumer &amp; Mining cards
   </div>
-  <h1>LLM inference<br><span>research lab</span></h1>
-  <p>Real benchmarks across 150 scenarios, 8 models, 3 runs each. Which model actually wins — and where each one breaks.</p>
+  <h1>Budget GPU<br><span>LLM leaderboard</span></h1>
+  <p>Real benchmarks on consumer and mining GPUs — RTX 3060, CMP 90HX, RTX 3090. 150 scenarios, 8 quality packs. Not datacenter hardware.</p>
   <div class="hero-cta">
-    <a href="https://github.com/Rhonstin/solo3090" class="btn btn-primary" target="_blank">
+    <a href="https://github.com/Rhonstin/inferrank" class="btn btn-primary" target="_blank">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
-      Rhonstin/solo3090
+      Rhonstin/inferrank
     </a>
     <a href="#leaderboard" class="btn btn-secondary">View results ↓</a>
   </div>
@@ -743,7 +743,7 @@
   </div>
 
   <div style="margin-top:1.5rem; padding:1.25rem; background:var(--surface); border:1px solid var(--border); border-radius:10px; font-size:0.875rem; color:var(--muted);">
-    This is an independent fork of <a href="https://github.com/noonghunna/club-3090" target="_blank" style="color:var(--accent)">noonghunna/club-3090</a>, focused exclusively on single-card RTX 3090 research. Multi-GPU content has been removed. If you have 2+ cards, the upstream repo covers dual/multi configs. All configs, scripts, overnight benchmark script, and raw JSON results are at <a href="https://github.com/Rhonstin/solo3090" target="_blank" style="color:var(--accent)">Rhonstin/solo3090</a>.
+    This is an independent fork of <a href="https://github.com/noonghunna/club-3090" target="_blank" style="color:var(--accent)">noonghunna/club-3090</a>, focused exclusively on single-card RTX 3090 research. Multi-GPU content has been removed. If you have 2+ cards, the upstream repo covers dual/multi configs. All configs, scripts, overnight benchmark script, and raw JSON results are at <a href="https://github.com/Rhonstin/inferrank" target="_blank" style="color:var(--accent)">Rhonstin/inferrank</a>.
   </div>
 </section>
 
@@ -991,12 +991,11 @@
 
 <footer>
   <p style="margin-bottom:0.5rem">
-    <strong style="color:var(--text)">solo3090</strong> — single RTX 3090 LLM research
+    <strong style="color:var(--text)">inferrank</strong> — budget GPU LLM leaderboard
   </p>
   <p>
-    <a href="https://github.com/Rhonstin/solo3090" target="_blank">GitHub</a> ·
-    Fork of <a href="https://github.com/noonghunna/club-3090" target="_blank">noonghunna/club-3090</a> ·
-    Benchmarks run 2026-06-04
+    <a href="https://github.com/Rhonstin/inferrank" target="_blank">GitHub</a> ·
+    Fork of <a href="https://github.com/noonghunna/club-3090" target="_blank">noonghunna/club-3090</a> · Benchmarks run 2026-06-04
   </p>
 </footer>
 
